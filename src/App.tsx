@@ -7,6 +7,7 @@ import WordExtractor from 'word-extractor';
 import { Buffer } from 'buffer';
 import VistaCarga from './components/VistaCarga';
 import VisorDocumento from './components/VisorDocumento';
+import { extractLegacyDocWithBold } from './utils/legacyDocBoldExtractor';
 
 // Configure PDF.js worker (usa el worker incluido en el proyecto en vez de una CDN externa,
 // que puede fallar por falta de conexión o desajuste de versión y hacía que el PDF no se leyera).
@@ -47,7 +48,7 @@ function fallbackTextExtraction(buffer: ArrayBuffer): string {
         let paragraphs = filterParagraphs(parts);
         
         if (paragraphs.length > 2) {
-            return paragraphs.map((m: string) => `<p>${m.trim()}</p>`).join('');
+            return paragraphs.map((m: string) => `<p><strong>${m.trim()}</strong></p>`).join('');
         }
 
         const decoder8 = new TextDecoder('utf-8');
@@ -55,9 +56,9 @@ function fallbackTextExtraction(buffer: ArrayBuffer): string {
         let cleanText8 = text8.replace(unreadableRegex, ' ');
         parts = cleanText8.split(/[\n\r]+/);
         paragraphs = filterParagraphs(parts);
-        
+
         if (paragraphs.length > 0) {
-            return paragraphs.map((m: string) => `<p>${m.trim()}</p>`).join('');
+            return paragraphs.map((m: string) => `<p><strong>${m.trim()}</strong></p>`).join('');
         }
     } catch (e) {
         console.error("Error en fallback", e);
@@ -67,6 +68,9 @@ function fallbackTextExtraction(buffer: ArrayBuffer): string {
 
 // Extrae texto de archivos .doc binarios (Word 97-2003) usando el parser real
 // del formato OLE, en vez de adivinar el texto a partir de los bytes crudos.
+// word-extractor solo expone texto plano (sin negrita/cursiva por run), y en la
+// práctica estos documentos antiguos se tipeaban enteros en negrita, así que se
+// envuelve cada párrafo en <strong> para no perder ese énfasis en la decoración.
 async function extractLegacyDoc(arrayBuffer: ArrayBuffer): Promise<string | null> {
     try {
         const extractor = new WordExtractor();
@@ -74,7 +78,7 @@ async function extractLegacyDoc(arrayBuffer: ArrayBuffer): Promise<string | null
         const body = document.getBody();
         const paragraphs = body.split(/\n+/).map(p => p.trim()).filter(Boolean);
         if (paragraphs.length === 0) return null;
-        return paragraphs.map(p => `<p>${p}</p>`).join('');
+        return paragraphs.map(p => `<p><strong>${p}</strong></p>`).join('');
     } catch (e) {
         console.warn('word-extractor falló al leer el .doc', e);
         return null;
@@ -119,7 +123,14 @@ export default function App() {
           setDocHtml(result.value);
         }
       } catch (error) {
-        console.warn('Mammoth falló, probando lector de .doc antiguo (Word 97-2003).');
+        console.warn('Mammoth falló, probando lector de .doc antiguo (Word 97-2003) con negrita real.');
+        const legacyHtmlConNegrita = await extractLegacyDocWithBold(arrayBuffer);
+        if (legacyHtmlConNegrita) {
+          setDocHtml(legacyHtmlConNegrita);
+          return;
+        }
+
+        console.warn('Lectura con negrita falló, probando lector de .doc antiguo estándar.');
         const legacyHtml = await extractLegacyDoc(arrayBuffer);
         if (legacyHtml) {
           setDocHtml(legacyHtml);

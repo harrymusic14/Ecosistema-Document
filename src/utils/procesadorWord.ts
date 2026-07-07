@@ -41,7 +41,7 @@ export const procesarFacturacion = (html: string): { html: string; cliente: stri
       return;
     }
 
-    if (upperText.match(/^SE[ÑN]OR(?:ES)?\s*:?$/) || upperText.match(/^CLIENTE\s*:?$/) || upperText.match(/^ATENCI[ÓO]N\s*:?$/)) {
+    if (upperText.match(/^SE[ÑN]OR(?:A|ES)?\s*:?$/) || upperText.match(/^CLIENTE\s*:?$/) || upperText.match(/^ATENCI[ÓO]N\s*:?$/)) {
       nextIsClient = true;
       nodesToRemove.push(child as HTMLElement);
       return;
@@ -54,7 +54,7 @@ export const procesarFacturacion = (html: string): { html: string; cliente: stri
       return;
     }
 
-    const inlineClient = text.match(/^(?:SE[ÑN]OR(?:ES)?|CLIENTE|ATENCI[ÓO]N)\s*:\s*(.+)$/i);
+    const inlineClient = text.match(/^(?:SE[ÑN]OR(?:A|ES)?|CLIENTE|ATENCI[ÓO]N)\s*:\s*(.+)$/i);
     if (inlineClient && cliente === "CLIENTE NO ESPECIFICADO") {
       cliente = inlineClient[1].trim().toUpperCase(); 
       nodesToRemove.push(child as HTMLElement);
@@ -104,7 +104,7 @@ export const procesarFacturacion = (html: string): { html: string; cliente: stri
   }
 
   if (cliente === "CLIENTE NO ESPECIFICADO") {
-    const fallbackClient = fullText.match(/(?:SE[ÑN]OR(?:ES)?|CLIENTE|ATENCI[ÓO]N)\s*:?\s*([A-Z\s]+?)(?=\s+(?:LIMA|RUC|DNI|FECHA|DIRECCI[ÓO]N|P[ÁA]GINA|PRECIO|COTIZACI[ÓO]N|01|$))/);
+    const fallbackClient = fullText.match(/(?:SE[ÑN]OR(?:A|ES)?|CLIENTE|ATENCI[ÓO]N)\s*:?\s*([A-Z\s]+?)(?=\s+(?:LIMA|RUC|DNI|FECHA|DIRECCI[ÓO]N|P[ÁA]GINA|PRECIO|COTIZACI[ÓO]N|01|$))/);
     if (fallbackClient) {
       cliente = fallbackClient[1].trim();
     }
@@ -115,22 +115,56 @@ export const procesarFacturacion = (html: string): { html: string; cliente: stri
     if (fallbackDate) fecha = fallbackDate[0];
   }
 
+  // Revisa si los primeros `longitud` caracteres de texto del nodo están TODOS dentro
+  // de una etiqueta <strong>/<b>. Se usa para el título de las líneas "título....precio":
+  // mirar solo esa parte (y no toda la línea) evita que una negrita en el precio termine
+  // marcando el título como negrita cuando en el Word original no lo estaba.
+  const textoEstaEnNegrita = (nodo: Node, longitud: number): boolean => {
+    let restante = longitud;
+    let huboContenido = false;
+    let todoNegrita = true;
+
+    const recorrer = (n: Node, dentroDeNegrita: boolean) => {
+      if (restante <= 0) return;
+      if (n.nodeType === Node.TEXT_NODE) {
+        const len = n.textContent?.length ?? 0;
+        const tomar = Math.min(len, restante);
+        if (tomar > 0) {
+          huboContenido = true;
+          if (!dentroDeNegrita) todoNegrita = false;
+        }
+        restante -= tomar;
+      } else if (n.nodeType === Node.ELEMENT_NODE) {
+        const tag = (n as Element).tagName;
+        const esNegrita = dentroDeNegrita || tag === 'STRONG' || tag === 'B';
+        for (const hijo of Array.from(n.childNodes)) {
+          recorrer(hijo, esNegrita);
+          if (restante <= 0) break;
+        }
+      }
+    };
+
+    recorrer(nodo, false);
+    return huboContenido && todoNegrita;
+  };
+
   // Detecta líneas tipo "MATERIALES....................S/ 85.00" (título + puntos de
-  // relleno + precio): el título se resalta en negrita y su precio pasa a la columna
-  // "Precio" de la tabla, alineado con esa línea, en vez de quedar pegado con puntos.
+  // relleno + precio): el precio pasa a la columna "Precio" de la tabla, alineado con
+  // esa línea, en vez de quedar pegado con puntos. El título conserva la negrita solo
+  // si ya estaba en negrita en el Word original (no se fuerza negrita nueva).
   // Los puntos se aceptan con espacios intercalados porque extractores como el de PDF
   // a veces separan cada carácter/glifo en su propio "item" con un espacio entre medio.
   const dotLeaderRegex = /^(.*[^\s.·•…])\s*(?:[.·•…]\s*){3,}(S\/\.?\s*[\d,]+(?:\.\d{2})?)\s*$/i;
-  // Palabras clave que siempre van resaltadas en negrita cuando aparecen como línea propia.
-  const palabraDestacadaRegex = /^(RIEGO|INSTALACI[ÓO]N)$/i;
   const filasDescripcion = Array.from(tempDiv.children).map(child => {
     const text = child.textContent?.trim() || '';
     const match = text.match(dotLeaderRegex);
     if (match) {
-      return { html: `<span class="font-bold">${match[1].trim()}</span>`, precio: match[2].trim() };
-    }
-    if (palabraDestacadaRegex.test(text)) {
-      return { html: `<span class="font-bold">${text}</span>`, precio: null as string | null };
+      const crudo = child.textContent || '';
+      const espaciosIniciales = crudo.length - crudo.trimStart().length;
+      const longitudTitulo = espaciosIniciales + match[1].length;
+      const eraNegrita = textoEstaEnNegrita(child, longitudTitulo);
+      const titulo = match[1].trim();
+      return { html: eraNegrita ? `<span class="font-bold">${titulo}</span>` : titulo, precio: match[2].trim() };
     }
     return { html: child.innerHTML, precio: null as string | null };
   });
