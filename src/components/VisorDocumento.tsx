@@ -47,13 +47,18 @@ export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento 
       const imgWidth = pageWidth;
       const imgHeight = (canvas.height * imgWidth) / canvas.width;
 
+      // Tolerancia para ignorar sobrantes mínimos (redondeo de escala/renderizado, o el
+      // padding inferior del documento en PlantillaFactura.tsx, p-[15mm]) que de otro
+      // modo generarían una segunda hoja en blanco aunque el contenido real quepa en una.
+      const TOLERANCIA_MM = 15;
+
       let heightLeft = imgHeight;
       let position = 0;
 
       pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
       heightLeft -= pageHeight;
 
-      while (heightLeft > 0) {
+      while (heightLeft > TOLERANCIA_MM) {
         position = heightLeft - imgHeight;
         pdf.addPage();
         pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);

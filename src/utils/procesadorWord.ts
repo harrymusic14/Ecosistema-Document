@@ -115,7 +115,31 @@ export const procesarFacturacion = (html: string): { html: string; cliente: stri
     if (fallbackDate) fecha = fallbackDate[0];
   }
 
-  const descripcionLimpia = tempDiv.innerHTML || '<p>SERVICIO GENERAL</p>';
+  // Detecta líneas tipo "MATERIALES....................S/ 85.00" (título + puntos de
+  // relleno + precio): el título se resalta en negrita y su precio pasa a la columna
+  // "Precio" de la tabla, alineado con esa línea, en vez de quedar pegado con puntos.
+  // Los puntos se aceptan con espacios intercalados porque extractores como el de PDF
+  // a veces separan cada carácter/glifo en su propio "item" con un espacio entre medio.
+  const dotLeaderRegex = /^(.*[^\s.·•…])\s*(?:[.·•…]\s*){3,}(S\/\.?\s*[\d,]+(?:\.\d{2})?)\s*$/i;
+  const filasDescripcion = Array.from(tempDiv.children).map(child => {
+    const text = child.textContent?.trim() || '';
+    const match = text.match(dotLeaderRegex);
+    if (match) {
+      return { html: `<span class="font-bold">${match[1].trim()}</span>`, precio: match[2].trim() };
+    }
+    return { html: child.innerHTML, precio: null as string | null };
+  });
+
+  if (filasDescripcion.length === 0) {
+    filasDescripcion.push({ html: 'SERVICIO GENERAL', precio: null });
+  }
+
+  const filasTabla = filasDescripcion.map((linea, idx) => `
+        <tr class="border-b border-slate-300 print-avoid-break">
+          ${idx === 0 ? `<td class="py-1 px-4 text-center font-bold text-sm border-r border-slate-300 align-top" rowspan="${filasDescripcion.length}">01</td>` : ''}
+          <td class="py-1 px-4 text-xs uppercase border-r border-slate-300 align-top leading-relaxed">${linea.html}</td>
+          <td class="py-1 px-4 text-center font-bold text-sm text-slate-900 align-top">${linea.precio ?? ''}</td>
+        </tr>`).join('');
 
   const filasMontos = tieneIgv ? `
     <tr class="border-b border-slate-300 bg-slate-50">
@@ -129,10 +153,10 @@ export const procesarFacturacion = (html: string): { html: string; cliente: stri
 
   // ---------- Bloque bancario, ahora SEPARADO del resto del contenido ----------
   const cuentaBancaria = `
-    <div class="inline-block border-[2px] border-red-600 p-3 bg-white text-red-600 text-xs font-medium uppercase tracking-wider shadow-sm">
-      <p class="mb-1">CUENTA DE AHORRO SOLES BCP</p>
-      <p class="mb-1">BCP SOLES: <span class="font-bold">193-27543218-0-31</span></p>
-      <p class="mb-1">CCI: <span class="font-bold">002-193-127543218031-10</span></p>
+    <div class="inline-block border border-red-600 p-1.5 bg-white text-red-600 text-[10px] font-medium uppercase tracking-wider shadow-sm leading-tight">
+      <p class="mb-0.5">CUENTA DE AHORRO SOLES BCP</p>
+      <p class="mb-0.5">BCP SOLES: <span class="font-bold">193-27543218-0-31</span></p>
+      <p class="mb-0.5">CCI: <span class="font-bold">002-193-127543218031-10</span></p>
       <p class="mb-0">Nombre: <span class="font-bold">ULICES RODRIGUEZ H.</span></p>
     </div>
   `;
@@ -151,17 +175,10 @@ export const procesarFacturacion = (html: string): { html: string; cliente: stri
         <tr>
           <th class="p-3 border border-slate-700 w-16 text-center">Cant.</th>
           <th class="p-3 border border-slate-700">Descripción / Justificación del Costo</th>
-          <th class="p-3 border border-slate-700 w-32 text-center">Precio Total</th>
+          <th class="p-3 border border-slate-700 w-32 text-center">Precio</th>
         </tr>
       </thead>
-      <tbody class="text-slate-800 bg-white">
-        <tr class="border-b border-slate-300 print-avoid-break">
-          <td class="p-4 text-center font-bold text-sm border-r border-slate-300 align-top">01</td>
-          <td class="p-4 text-xs uppercase border-r border-slate-300 align-top leading-relaxed">
-            ${descripcionLimpia}
-          </td>
-          <td class="p-4 text-center font-bold text-sm text-slate-900 align-top">${totalTexto}</td>
-        </tr>
+      <tbody class="text-slate-800 bg-white">${filasTabla}
       </tbody>
     </table>
     
