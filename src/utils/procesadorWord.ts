@@ -121,11 +121,16 @@ export const procesarFacturacion = (html: string): { html: string; cliente: stri
   // Los puntos se aceptan con espacios intercalados porque extractores como el de PDF
   // a veces separan cada carácter/glifo en su propio "item" con un espacio entre medio.
   const dotLeaderRegex = /^(.*[^\s.·•…])\s*(?:[.·•…]\s*){3,}(S\/\.?\s*[\d,]+(?:\.\d{2})?)\s*$/i;
+  // Palabras clave que siempre van resaltadas en negrita cuando aparecen como línea propia.
+  const palabraDestacadaRegex = /^(RIEGO|INSTALACI[ÓO]N)$/i;
   const filasDescripcion = Array.from(tempDiv.children).map(child => {
     const text = child.textContent?.trim() || '';
     const match = text.match(dotLeaderRegex);
     if (match) {
       return { html: `<span class="font-bold">${match[1].trim()}</span>`, precio: match[2].trim() };
+    }
+    if (palabraDestacadaRegex.test(text)) {
+      return { html: `<span class="font-bold">${text}</span>`, precio: null as string | null };
     }
     return { html: child.innerHTML, precio: null as string | null };
   });
