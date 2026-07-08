@@ -44,24 +44,42 @@ export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento 
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
 
-      const imgWidth = pageWidth;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      // Tamaño natural del documento (ancho = hoja completa, alto proporcional al canvas).
+      const anchoNatural = pageWidth;
+      const altoNatural = (canvas.height * anchoNatural) / canvas.width;
 
-      // Tolerancia para ignorar sobrantes mínimos (redondeo de escala/renderizado, o el
-      // padding inferior del documento en PlantillaFactura.tsx, p-[15mm]) que de otro
-      // modo generarían una segunda hoja en blanco aunque el contenido real quepa en una.
-      const TOLERANCIA_MM = 15;
+      // Si el contenido se desborda solo un poco (p.ej. el bloque bancario o el pie de
+      // página cayendo unos milímetros en una segunda hoja casi vacía), se reduce el
+      // tamaño del documento completo para que quepa en una hoja menos, en vez de generar
+      // esa hoja extra. Si de verdad hace falta más de una hoja (el contenido no entra ni
+      // reduciéndolo de forma razonable), se respeta esa cantidad de hojas tal cual.
+      const ESCALA_MINIMA = 0.75;
+      const paginasNaturales = Math.max(1, Math.ceil(altoNatural / pageHeight));
+
+      let paginasObjetivo = paginasNaturales;
+      for (let candidata = 1; candidata < paginasNaturales; candidata++) {
+        const escalaCandidata = (candidata * pageHeight) / altoNatural;
+        if (escalaCandidata >= ESCALA_MINIMA) {
+          paginasObjetivo = candidata;
+          break;
+        }
+      }
+
+      const escala = Math.min(1, (paginasObjetivo * pageHeight) / altoNatural);
+      const imgWidth = anchoNatural * escala;
+      const imgHeight = altoNatural * escala;
+      const offsetX = (pageWidth - imgWidth) / 2;
 
       let heightLeft = imgHeight;
       let position = 0;
 
-      pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
+      pdf.addImage(imgData, 'JPEG', offsetX, position, imgWidth, imgHeight);
       heightLeft -= pageHeight;
 
-      while (heightLeft > TOLERANCIA_MM) {
+      while (heightLeft > 0.5) {
         position = heightLeft - imgHeight;
         pdf.addPage();
-        pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
+        pdf.addImage(imgData, 'JPEG', offsetX, position, imgWidth, imgHeight);
         heightLeft -= pageHeight;
       }
 

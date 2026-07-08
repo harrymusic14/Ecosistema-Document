@@ -115,31 +115,35 @@ export const procesarFacturacion = (html: string): { html: string; cliente: stri
     if (fallbackDate) fecha = fallbackDate[0];
   }
 
-  // Revisa si los primeros `longitud` caracteres de texto del nodo están TODOS dentro
-  // de una etiqueta <strong>/<b>. Se usa para el título de las líneas "título....precio":
-  // mirar solo esa parte (y no toda la línea) evita que una negrita en el precio termine
-  // marcando el título como negrita cuando en el Word original no lo estaba.
-  const textoEstaEnNegrita = (nodo: Node, longitud: number): boolean => {
-    let restante = longitud;
+  // Revisa si los caracteres de texto del nodo en el rango [inicio, fin) están TODOS
+  // dentro de una etiqueta <strong>/<b>. Se usa por separado para el título y para el
+  // precio de las líneas "título....precio": mirar solo el tramo correspondiente (y no
+  // toda la línea) evita que la negrita de uno termine contagiando al otro cuando en el
+  // Word original solo uno de los dos estaba en negrita.
+  const rangoEstaEnNegrita = (nodo: Node, inicio: number, fin: number): boolean => {
+    let pos = 0;
     let huboContenido = false;
     let todoNegrita = true;
 
     const recorrer = (n: Node, dentroDeNegrita: boolean) => {
-      if (restante <= 0) return;
+      if (pos >= fin) return;
       if (n.nodeType === Node.TEXT_NODE) {
         const len = n.textContent?.length ?? 0;
-        const tomar = Math.min(len, restante);
-        if (tomar > 0) {
+        const inicioNodo = pos;
+        const finNodo = pos + len;
+        const solapeInicio = Math.max(inicioNodo, inicio);
+        const solapeFin = Math.min(finNodo, fin);
+        if (solapeFin > solapeInicio) {
           huboContenido = true;
           if (!dentroDeNegrita) todoNegrita = false;
         }
-        restante -= tomar;
+        pos = finNodo;
       } else if (n.nodeType === Node.ELEMENT_NODE) {
         const tag = (n as Element).tagName;
         const esNegrita = dentroDeNegrita || tag === 'STRONG' || tag === 'B';
         for (const hijo of Array.from(n.childNodes)) {
           recorrer(hijo, esNegrita);
-          if (restante <= 0) break;
+          if (pos >= fin) break;
         }
       }
     };
@@ -162,22 +166,34 @@ export const procesarFacturacion = (html: string): { html: string; cliente: stri
       const crudo = child.textContent || '';
       const espaciosIniciales = crudo.length - crudo.trimStart().length;
       const longitudTitulo = espaciosIniciales + match[1].length;
-      const eraNegrita = textoEstaEnNegrita(child, longitudTitulo);
+      const eraNegrita = rangoEstaEnNegrita(child, 0, longitudTitulo);
       const titulo = match[1].trim();
-      return { html: eraNegrita ? `<span class="font-bold">${titulo}</span>` : titulo, precio: match[2].trim() };
+
+      // El precio queda al final del texto recortado (match[0] cubre `text` completo
+      // porque el regex está anclado con ^...$), así que su inicio es text.length menos
+      // su propio largo.
+      const inicioPrecio = espaciosIniciales + text.length - match[2].length;
+      const finPrecio = espaciosIniciales + text.length;
+      const precioNegrita = rangoEstaEnNegrita(child, inicioPrecio, finPrecio);
+
+      return {
+        html: eraNegrita ? `<span class="font-bold">${titulo}</span>` : titulo,
+        precio: match[2].trim(),
+        precioNegrita,
+      };
     }
-    return { html: child.innerHTML, precio: null as string | null };
+    return { html: child.innerHTML, precio: null as string | null, precioNegrita: false };
   });
 
   if (filasDescripcion.length === 0) {
-    filasDescripcion.push({ html: 'SERVICIO GENERAL', precio: null });
+    filasDescripcion.push({ html: 'SERVICIO GENERAL', precio: null, precioNegrita: false });
   }
 
   const filasTabla = filasDescripcion.map((linea, idx) => `
         <tr class="border-b border-slate-300 print-avoid-break">
           ${idx === 0 ? `<td class="py-1 px-4 text-center font-bold text-sm border-r border-slate-300 align-top" rowspan="${filasDescripcion.length}">01</td>` : ''}
           <td class="py-1 px-4 text-xs uppercase border-r border-slate-300 align-top leading-relaxed">${linea.html}</td>
-          <td class="py-1 px-4 text-center font-bold text-sm text-slate-900 align-top">${linea.precio ?? ''}</td>
+          <td class="py-1 px-4 text-center text-sm text-slate-900 align-top${linea.precioNegrita ? ' font-bold' : ''}">${linea.precio ?? ''}</td>
         </tr>`).join('');
 
   const filasMontos = tieneIgv ? `
