@@ -12,6 +12,51 @@ interface VisorProps {
   tipoDocumento: string;
 }
 
+// Espera a que las fuentes y todas las imágenes (ej. el logo) del elemento terminen de
+// cargar. Sin esto, si el usuario descarga el PDF apenas se abre la vista, html2canvas
+// puede capturar el logo a medio cargar. Con timeout por imagen para no colgarse si
+// alguna falla en cargar.
+async function esperarRecursosListos(element: HTMLElement) {
+  if (document.fonts?.ready) {
+    try { await document.fonts.ready; } catch { /* noop */ }
+  }
+  const imagenes = Array.from(element.querySelectorAll('img'));
+  await Promise.all(imagenes.map(img => {
+    if (img.complete) return Promise.resolve();
+    return new Promise<void>(resolve => {
+      const listo = () => resolve();
+      img.addEventListener('load', listo, { once: true });
+      img.addEventListener('error', listo, { once: true });
+      setTimeout(listo, 3000);
+    });
+  }));
+}
+
+// Verifica que la captura sí haya salido con estilos: muestrea el centro del recuadro
+// azul oscuro (bg-brand-dark) del encabezado -el primero que aparece en el documento- y
+// comprueba que el canvas lo pintó oscuro. Si html2canvas clonó el documento sin la
+// hoja de estilos (el bug que motivó este chequeo), ese recuadro sale blanco.
+function capturaTieneEstilos(canvas: HTMLCanvasElement, element: HTMLElement): boolean {
+  const insignia = element.querySelector<HTMLElement>('.bg-brand-dark');
+  if (!insignia) return true;
+
+  const elementoRect = element.getBoundingClientRect();
+  const insigniaRect = insignia.getBoundingClientRect();
+  if (elementoRect.width === 0 || elementoRect.height === 0) return true;
+
+  const escalaX = canvas.width / elementoRect.width;
+  const escalaY = canvas.height / elementoRect.height;
+  const x = Math.round((insigniaRect.left - elementoRect.left + insigniaRect.width / 2) * escalaX);
+  const y = Math.round((insigniaRect.top - elementoRect.top + insigniaRect.height / 2) * escalaY);
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx || x < 0 || y < 0 || x >= canvas.width || y >= canvas.height) return true;
+
+  const [r, g, b] = ctx.getImageData(x, y, 1, 1).data;
+  // #0f172a (brand-dark) es un azul casi negro: si el pixel salió claro, no se aplicaron los estilos.
+  return r < 100 && g < 100 && b < 100;
+}
+
 export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento }: VisorProps) {
   const [generando, setGenerando] = useState(false);
 
@@ -22,6 +67,17 @@ export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento 
     if (!element) return;
 
     setGenerando(true);
+    await esperarRecursosListos(element);
+
+    // html2canvas-pro clona el documento en un iframe oculto y, al hacerlo, vuelve a
+    // pedir por red la hoja de estilos (Tailwind). En la primera descarga tras cargar
+    // la página esa segunda petición puede llegar antes de que el navegador termine de
+    // cachearla, y la clonación sale sin estilos (como HTML plano), aunque la pantalla
+    // se vea bien. Una captura de "calentamiento" descartable fuerza esa petición a
+    // resolverse en caché antes de la captura real, evitando tener que reintentar.
+    try {
+      await html2canvas(element, { scale: 1, useCORS: true, backgroundColor: '#ffffff', scrollY: 0 });
+    } catch { /* noop: si el calentamiento falla, seguimos con la captura real */ }
 
     const nombreLimpio = cliente.replace(/[^a-zA-Z0-9 ñÑ]/g, '').trim() || 'Documento';
 
@@ -85,12 +141,24 @@ export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento 
       raiz.style.fontSize = paginasObjetivo === paginasNaturales ? '' : `${escalaElegida * 100}%`;
       void element.offsetHeight;
 
-      const canvas = await html2canvas(element, {
+      // Reintenta la captura real si sale sin estilos (ver capturaTieneEstilos), en vez
+      // de dejar que el usuario descargue un PDF roto y tenga que darse cuenta y volver
+      // a intentarlo manualmente.
+      let canvas = await html2canvas(element, {
         scale: 2,
         useCORS: true,
         backgroundColor: '#ffffff',
         scrollY: 0,
       });
+
+      for (let intento = 0; intento < 2 && !capturaTieneEstilos(canvas, element); intento++) {
+        canvas = await html2canvas(element, {
+          scale: 2,
+          useCORS: true,
+          backgroundColor: '#ffffff',
+          scrollY: 0,
+        });
+      }
 
       const imgData = canvas.toDataURL('image/jpeg', 0.98);
 

@@ -19,7 +19,12 @@ export const procesarFacturacion = (html: string): { html: string; cliente: stri
   let subtotalTexto = "---";
   let igvTexto = "---";
 
-  const tieneIgv = /IGV/i.test(html);
+  // "/IGV/i.test(html)" por sí solo detecta la palabra "IGV" en cualquier parte,
+  // incluida una negación como "NO INCLUYE IGV" (que precisamente indica lo
+  // contrario). Se revisa primero si el documento niega explícitamente el IGV
+  // para no calcular ni mostrar el desglose Subtotal/IGV en ese caso.
+  const noIncluyeIgv = /\bNO\s+(?:INCLUYE|INCLUIDO|INCLUYA|APLICA)\s+(?:EL\s+)?IGV\b|\bSIN\s+IGV\b|\bIGV\s+NO\s+INCLUIDO\b/i.test(html);
+  const tieneIgv = /IGV/i.test(html) && !noIncluyeIgv;
   let nextIsClient = false;
   const nodesToRemove: HTMLElement[] = [];
 
