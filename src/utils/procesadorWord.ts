@@ -3,12 +3,18 @@ export const procesarFacturacion = (html: string): { html: string; cliente: stri
   const tempDiv = document.createElement('div');
   tempDiv.innerHTML = html;
 
+  // Algunas cotizaciones (ej. repuestos importados "HUNTER USA") se cobran en dólares
+  // (U$) en vez de soles (S/). Se detecta una sola vez para todo el documento y se usa
+  // ese símbolo en los montos calculados (Total/Subtotal/IGV), en vez de asumir soles.
+  const monedaDolar = /U\s*\$|US\$/i.test(html);
+  const simboloMoneda = monedaDolar ? 'U$' : 'S/';
+
   let fecha = "No especificada";
   let cliente = "CLIENTE NO ESPECIFICADO";
-  let totalTexto = "S/ 0.00";
+  let totalTexto = `${simboloMoneda} 0.00`;
   let subtotalTexto = "---";
   let igvTexto = "---";
-  
+
   const tieneIgv = /IGV/i.test(html);
   let nextIsClient = false;
   const nodesToRemove: HTMLElement[] = [];
@@ -71,13 +77,13 @@ export const procesarFacturacion = (html: string): { html: string; cliente: stri
     if (priceMatch) {
       const numericTotal = parseFloat(priceMatch[1].replace(/,/g, ''));
       if (!isNaN(numericTotal)) {
-        totalTexto = `S/ ${numericTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-        
+        totalTexto = `${simboloMoneda} ${numericTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
         if (tieneIgv) {
           const sub = numericTotal / 1.18;
           const igv = numericTotal - sub;
-          subtotalTexto = `S/ ${sub.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-          igvTexto = `S/ ${igv.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+          subtotalTexto = `${simboloMoneda} ${sub.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+          igvTexto = `${simboloMoneda} ${igv.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
         }
       }
       nodesToRemove.push(child as HTMLElement);
@@ -93,12 +99,12 @@ export const procesarFacturacion = (html: string): { html: string; cliente: stri
 
   // Fallback global: si por culpa de extraer texto bruto no encontró el precio, búscalo en todo el documento.
   const fullText = tempDiv.textContent?.replace(/\s+/g, ' ').toUpperCase() || '';
-  if (totalTexto === "S/ 0.00") {
+  if (totalTexto === `${simboloMoneda} 0.00`) {
     const fallbackPrice = fullText.match(/(?:PRECIO\s*TOTAL|TOTAL|MONTO|COSTO).*?(?:S\s*\/|\$|SOLES)?\s*([\d,]+(?:\.\d{2})?)/);
     if (fallbackPrice) {
       const num = parseFloat(fallbackPrice[1].replace(/,/g, ''));
       if (!isNaN(num)) {
-        totalTexto = `S/ ${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        totalTexto = `${simboloMoneda} ${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
       }
     }
   }
@@ -158,9 +164,10 @@ export const procesarFacturacion = (html: string): { html: string; cliente: stri
   // si ya estaba en negrita en el Word original (no se fuerza negrita nueva).
   // Los puntos se aceptan con espacios intercalados porque extractores como el de PDF
   // a veces separan cada carácter/glifo en su propio "item" con un espacio entre medio.
-  // El "S/" también se acepta con espacios sueltos (ej. "s / 450.00") porque algunos
-  // documentos originales lo escriben así.
-  const dotLeaderRegex = /^(.*[^\s.·•…])\s*(?:[.·•…]\s*){3,}(S\s*\/\s*\.?\s*[\d,]+(?:\.\d{2})?)\s*$/i;
+  // El símbolo de moneda se acepta con espacios sueltos (ej. "s / 450.00") porque algunos
+  // documentos originales lo escriben así, y también en dólares ("U$200.00") además de
+  // soles ("S/"), ya que algunas cotizaciones de repuestos importados usan esa moneda.
+  const dotLeaderRegex = /^(.*[^\s.·•…])\s*(?:[.·•…]\s*){3,}((?:S\s*\/\s*\.?|US\s*\$|U\s*\$|\$)\s*[\d,]+(?:\.\d{2})?)\s*$/i;
   const filasDescripcion = Array.from(tempDiv.children).map(child => {
     const text = child.textContent?.trim() || '';
     const match = text.match(dotLeaderRegex);
