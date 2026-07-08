@@ -26,6 +26,11 @@ export const procesarFacturacion = (html: string): { html: string; cliente: stri
   Array.from(tempDiv.children).forEach(child => {
     const text = child.textContent?.trim() || '';
     const upperText = text.toUpperCase();
+    // Los .doc antiguos suelen escribir el membrete con espacios dobles/triples
+    // (ej. "ECO  SISTEMAS  URH  SAC" para simular espaciado de letras), lo que
+    // rompe una comparación por texto literal de un solo espacio. Se normaliza
+    // aquí antes de comparar contra los patrones del membrete.
+    const upperTextNorm = upperText.replace(/\s+/g, ' ');
 
     if (!text) {
       nodesToRemove.push(child as HTMLElement);
@@ -33,12 +38,20 @@ export const procesarFacturacion = (html: string): { html: string; cliente: stri
     }
 
     if (
-      upperText.includes('ECO SISTEMAS URH') ||
-      upperText.includes('MZ A LT') ||
-      upperText.includes('998270102') ||
-      upperText.includes('985832096') ||
-      upperText.includes('HOTMAIL.COM') ||
-      upperText.includes('A SU GENTIL SOLICITUD')
+      upperTextNorm.includes('ECO SISTEMAS URH') ||
+      upperTextNorm.includes('MZ A LT') ||
+      upperTextNorm.includes('998270102') ||
+      upperTextNorm.includes('985832096') ||
+      upperTextNorm.includes('HOTMAIL.COM') ||
+      // La línea "E-mail: ..." del membrete a veces pierde el dominio al extraer
+      // el .doc (queda "E-mail: Ecosistema" sin "@hotmail.com"), así que además
+      // del dominio literal se detecta la etiqueta "E-mail"/"Correo" o cualquier
+      // dirección de correo suelta (contiene "@") para no dejarla filtrar a la
+      // tabla de descripción, donde el correo ya se muestra en el encabezado.
+      /^E-?MAIL\b/.test(upperTextNorm) ||
+      /^CORREO\b/.test(upperTextNorm) ||
+      upperTextNorm.includes('@') ||
+      upperTextNorm.includes('A SU GENTIL SOLICITUD')
     ) {
       nodesToRemove.push(child as HTMLElement);
       return;
