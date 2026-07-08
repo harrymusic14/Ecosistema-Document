@@ -34,7 +34,7 @@ export const procesarFacturacion = (html: string): { html: string; cliente: stri
       return;
     }
 
-    const dateMatch = upperText.match(/(?:LIMA,?\s*)?(\d{1,2}\s+DE\s+[A-Z]+\s+(?:DEL?\s+)?\d{4}|\d{2}\/\d{2}\/\d{4})/);
+    const dateMatch = upperText.match(/(?:LIMA,?\s*)?(\d{1,2}\s+(?:DE\s+)?[A-Z]+\s+(?:DEL?\s+)?\d{4}|\d{2}\/\d{2}\/\d{4})/);
     if (dateMatch && fecha === "No especificada") {
       fecha = text; 
       nodesToRemove.push(child as HTMLElement);
@@ -67,7 +67,7 @@ export const procesarFacturacion = (html: string): { html: string; cliente: stri
       return;
     }
 
-    const priceMatch = upperText.match(/(?:PRECIO\s*TOTAL|TOTAL|MONTO|COSTO).*?(?:S\/|\$|SOLES)?\s*([\d,]+(?:\.\d{2})?)/);
+    const priceMatch = upperText.match(/(?:PRECIO\s*TOTAL|TOTAL|MONTO|COSTO).*?(?:S\s*\/|\$|SOLES)?\s*([\d,]+(?:\.\d{2})?)/);
     if (priceMatch) {
       const numericTotal = parseFloat(priceMatch[1].replace(/,/g, ''));
       if (!isNaN(numericTotal)) {
@@ -94,7 +94,7 @@ export const procesarFacturacion = (html: string): { html: string; cliente: stri
   // Fallback global: si por culpa de extraer texto bruto no encontró el precio, búscalo en todo el documento.
   const fullText = tempDiv.textContent?.replace(/\s+/g, ' ').toUpperCase() || '';
   if (totalTexto === "S/ 0.00") {
-    const fallbackPrice = fullText.match(/(?:PRECIO\s*TOTAL|TOTAL|MONTO|COSTO).*?(?:S\/|\$|SOLES)?\s*([\d,]+(?:\.\d{2})?)/);
+    const fallbackPrice = fullText.match(/(?:PRECIO\s*TOTAL|TOTAL|MONTO|COSTO).*?(?:S\s*\/|\$|SOLES)?\s*([\d,]+(?:\.\d{2})?)/);
     if (fallbackPrice) {
       const num = parseFloat(fallbackPrice[1].replace(/,/g, ''));
       if (!isNaN(num)) {
@@ -111,7 +111,7 @@ export const procesarFacturacion = (html: string): { html: string; cliente: stri
   }
 
   if (fecha === "No especificada") {
-    const fallbackDate = fullText.match(/(?:LIMA,?\s*)?(\d{1,2}\s+DE\s+[A-Z]+\s+(?:DEL?\s+)?\d{4}|\d{2}\/\d{2}\/\d{4})/);
+    const fallbackDate = fullText.match(/(?:LIMA,?\s*)?(\d{1,2}\s+(?:DE\s+)?[A-Z]+\s+(?:DEL?\s+)?\d{4}|\d{2}\/\d{2}\/\d{4})/);
     if (fallbackDate) fecha = fallbackDate[0];
   }
 
@@ -158,7 +158,9 @@ export const procesarFacturacion = (html: string): { html: string; cliente: stri
   // si ya estaba en negrita en el Word original (no se fuerza negrita nueva).
   // Los puntos se aceptan con espacios intercalados porque extractores como el de PDF
   // a veces separan cada carácter/glifo en su propio "item" con un espacio entre medio.
-  const dotLeaderRegex = /^(.*[^\s.·•…])\s*(?:[.·•…]\s*){3,}(S\/\.?\s*[\d,]+(?:\.\d{2})?)\s*$/i;
+  // El "S/" también se acepta con espacios sueltos (ej. "s / 450.00") porque algunos
+  // documentos originales lo escriben así.
+  const dotLeaderRegex = /^(.*[^\s.·•…])\s*(?:[.·•…]\s*){3,}(S\s*\/\s*\.?\s*[\d,]+(?:\.\d{2})?)\s*$/i;
   const filasDescripcion = Array.from(tempDiv.children).map(child => {
     const text = child.textContent?.trim() || '';
     const match = text.match(dotLeaderRegex);
