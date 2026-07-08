@@ -9,6 +9,10 @@ export const procesarFacturacion = (html: string): { html: string; cliente: stri
   const monedaDolar = /U\s*\$|US\$/i.test(html);
   const simboloMoneda = monedaDolar ? 'U$' : 'S/';
 
+  // Títulos frecuentes antes del nombre del cliente en las cartas, además de
+  // "Señor(es)/Cliente/Atención": "Ing.", "Arq.", "Dr(a).", "Lic.", "Sr(a)./Srta.".
+  const TITULOS_CLIENTE = 'SE[ÑN]OR(?:A|ES)?|CLIENTE|ATENCI[ÓO]N|ING|ARQ|DRA?|LIC|SRA?|SRTA';
+
   let fecha = "No especificada";
   let cliente = "CLIENTE NO ESPECIFICADO";
   let totalTexto = `${simboloMoneda} 0.00`;
@@ -47,7 +51,7 @@ export const procesarFacturacion = (html: string): { html: string; cliente: stri
       return;
     }
 
-    if (upperText.match(/^SE[ÑN]OR(?:A|ES)?\s*:?$/) || upperText.match(/^CLIENTE\s*:?$/) || upperText.match(/^ATENCI[ÓO]N\s*:?$/)) {
+    if (upperText.match(new RegExp(`^(?:${TITULOS_CLIENTE})\\.?\\s*:?$`))) {
       nextIsClient = true;
       nodesToRemove.push(child as HTMLElement);
       return;
@@ -60,7 +64,7 @@ export const procesarFacturacion = (html: string): { html: string; cliente: stri
       return;
     }
 
-    const inlineClient = text.match(/^(?:SE[ÑN]OR(?:A|ES)?|CLIENTE|ATENCI[ÓO]N)\s*:\s*(.+)$/i);
+    const inlineClient = text.match(new RegExp(`^(?:${TITULOS_CLIENTE})\\.?\\s*:\\s*(.+)$`, 'i'));
     if (inlineClient && cliente === "CLIENTE NO ESPECIFICADO") {
       cliente = inlineClient[1].trim().toUpperCase(); 
       nodesToRemove.push(child as HTMLElement);
@@ -73,7 +77,7 @@ export const procesarFacturacion = (html: string): { html: string; cliente: stri
       return;
     }
 
-    const priceMatch = upperText.match(/(?:PRECIO\s*TOTAL|TOTAL|MONTO|COSTO).*?(?:S\s*\/|\$|SOLES)?\s*([\d,]+(?:\.\d{2})?)/);
+    const priceMatch = upperText.match(/(?:PRECIO\s*(?:TOTAL|GLOBAL)|TOTAL|MONTO|COSTO).*?(?:S\s*\/|\$|SOLES)?\s*([\d,]+(?:\.\d{2})?)/);
     if (priceMatch) {
       const numericTotal = parseFloat(priceMatch[1].replace(/,/g, ''));
       if (!isNaN(numericTotal)) {
@@ -100,7 +104,7 @@ export const procesarFacturacion = (html: string): { html: string; cliente: stri
   // Fallback global: si por culpa de extraer texto bruto no encontró el precio, búscalo en todo el documento.
   const fullText = tempDiv.textContent?.replace(/\s+/g, ' ').toUpperCase() || '';
   if (totalTexto === `${simboloMoneda} 0.00`) {
-    const fallbackPrice = fullText.match(/(?:PRECIO\s*TOTAL|TOTAL|MONTO|COSTO).*?(?:S\s*\/|\$|SOLES)?\s*([\d,]+(?:\.\d{2})?)/);
+    const fallbackPrice = fullText.match(/(?:PRECIO\s*(?:TOTAL|GLOBAL)|TOTAL|MONTO|COSTO).*?(?:S\s*\/|\$|SOLES)?\s*([\d,]+(?:\.\d{2})?)/);
     if (fallbackPrice) {
       const num = parseFloat(fallbackPrice[1].replace(/,/g, ''));
       if (!isNaN(num)) {
@@ -110,7 +114,7 @@ export const procesarFacturacion = (html: string): { html: string; cliente: stri
   }
 
   if (cliente === "CLIENTE NO ESPECIFICADO") {
-    const fallbackClient = fullText.match(/(?:SE[ÑN]OR(?:A|ES)?|CLIENTE|ATENCI[ÓO]N)\s*:?\s*([A-Z\s]+?)(?=\s+(?:LIMA|RUC|DNI|FECHA|DIRECCI[ÓO]N|P[ÁA]GINA|PRECIO|COTIZACI[ÓO]N|01|$))/);
+    const fallbackClient = fullText.match(new RegExp(`(?:${TITULOS_CLIENTE})\\.?\\s*:?\\s*([A-Z\\s]+?)(?=\\s+(?:LIMA|RUC|DNI|FECHA|DIRECCI[ÓO]N|P[ÁA]GINA|PRECIO|COTIZACI[ÓO]N|01|$))`));
     if (fallbackClient) {
       cliente = fallbackClient[1].trim();
     }
