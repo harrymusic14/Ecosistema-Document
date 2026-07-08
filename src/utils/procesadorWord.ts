@@ -23,8 +23,27 @@ export const procesarFacturacion = (html: string): { html: string; cliente: stri
   // incluida una negación como "NO INCLUYE IGV" (que precisamente indica lo
   // contrario). Se revisa primero si el documento niega explícitamente el IGV
   // para no calcular ni mostrar el desglose Subtotal/IGV en ese caso.
-  const noIncluyeIgv = /\bNO\s+(?:INCLUYE|INCLUIDO|INCLUYA|APLICA)\s+(?:EL\s+)?IGV\b|\bSIN\s+IGV\b|\bIGV\s+NO\s+INCLUIDO\b/i.test(html);
-  const tieneIgv = /IGV/i.test(html) && !noIncluyeIgv;
+  //
+  // La negación se busca en el texto plano (sin etiquetas) de cada párrafo y no en
+  // el string `html` crudo: los .doc antiguos pueden partir una frase en varias
+  // etiquetas <strong>/<p> a mitad de palabra (la negrita real del Word original no
+  // siempre coincide con los límites de palabra), lo que rompe "NO INCLUYE IGV" en
+  // algo como "NO INCLUYE</strong> IGV" y hace que el regex no la reconozca como
+  // una frase contigua.
+  //
+  // Ojo: tempDiv.textContent concatena TODOS los párrafos sin ningún separador
+  // (los <p> no insertan espacio/salto de línea en .textContent), así que un párrafo
+  // que termina en "...IGV" pegado al siguiente que empieza en "PRECIO..." queda
+  // como "...IGVPRECIO...", sin límite de palabra después de "IGV" (el regex de
+  // negación usa \b y ahí V-P son ambas letras, no hay borde). Por eso se arma el
+  // texto uniendo cada párrafo/hijo por separado con un espacio de por medio.
+  const textoCompleto = Array.from(tempDiv.children)
+    .map(child => child.textContent || '')
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .toUpperCase();
+  const noIncluyeIgv = /\bNO\s+(?:INCLUYE|INCLUIDO|INCLUYA|APLICA)\s+(?:EL\s+)?IGV\b|\bSIN\s+IGV\b|\bIGV\s+NO\s+INCLUIDO\b/.test(textoCompleto);
+  const tieneIgv = /IGV/.test(textoCompleto) && !noIncluyeIgv;
   let nextIsClient = false;
   const nodesToRemove: HTMLElement[] = [];
 
