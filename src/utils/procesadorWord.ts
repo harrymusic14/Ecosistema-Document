@@ -1,5 +1,7 @@
 // src/utils/procesadorWord.ts
-export const procesarFacturacion = (html: string): { html: string; cliente: string; cuentaBancaria: string } => {
+export type TipoPago = 'BCP' | 'SCOTIABANK';
+
+export const procesarFacturacion = (html: string, tipoPago: TipoPago = 'BCP'): { html: string; cliente: string; cuentaBancaria: string } => {
   const tempDiv = document.createElement('div');
   tempDiv.innerHTML = html;
 
@@ -199,16 +201,20 @@ export const procesarFacturacion = (html: string): { html: string; cliente: stri
     return huboContenido && todoNegrita;
   };
 
-  // Detecta líneas tipo "MATERIALES....................S/ 85.00" (título + puntos de
-  // relleno + precio): el precio pasa a la columna "Precio" de la tabla, alineado con
-  // esa línea, en vez de quedar pegado con puntos. El título conserva la negrita solo
-  // si ya estaba en negrita en el Word original (no se fuerza negrita nueva).
-  // Los puntos se aceptan con espacios intercalados porque extractores como el de PDF
-  // a veces separan cada carácter/glifo en su propio "item" con un espacio entre medio.
+  // Detecta líneas tipo "MATERIALES....................S/ 85.00" o "VÁLVULAS: U$ 450.00"
+  // (título + separador + precio): el precio pasa a la columna "Precio" de la tabla, en
+  // vez de quedar pegado en la descripción. El título conserva la negrita solo si ya
+  // estaba en negrita en el Word original (no se fuerza negrita nueva).
+  // El separador entre título y precio se acepta en cualquier forma -puntos de relleno,
+  // dos puntos, tabulador o solo espacio- porque cuando el Word original usa un
+  // tabulador con "relleno de puntos" (característica de formato de párrafo de Word),
+  // los puntos son solo visuales: al extraer el texto real (Mammoth o el lector de .doc
+  // antiguo) solo queda un tabulador, sin ningún punto. Por eso ya no se exige ver un
+  // mínimo de puntos: basta con que la línea TERMINE en un monto de dinero.
   // El símbolo de moneda se acepta con espacios sueltos (ej. "s / 450.00") porque algunos
   // documentos originales lo escriben así, y también en dólares ("U$200.00") además de
   // soles ("S/"), ya que algunas cotizaciones de repuestos importados usan esa moneda.
-  const dotLeaderRegex = /^(.*[^\s.·•…])\s*(?:[.·•…]\s*){3,}((?:S\s*\/\s*\.?|US\s*\$|U\s*\$|\$)\s*[\d,]+(?:\.\d{2})?)\s*$/i;
+  const dotLeaderRegex = /^(.+?)[\s.·•…:]*((?:S\s*\/\s*\.?|US\s*\$|U\s*\$|\$)\s*[\d,]+(?:\.\d{2})?)\s*$/i;
   const filasDescripcion = Array.from(tempDiv.children).map(child => {
     const text = child.textContent?.trim() || '';
     const match = text.match(dotLeaderRegex);
@@ -257,7 +263,9 @@ export const procesarFacturacion = (html: string): { html: string; cliente: stri
     </tr>` : '';
 
   // ---------- Bloque bancario, ahora SEPARADO del resto del contenido ----------
-  const cuentaBancaria = `
+  // Según el tipo de pago elegido en la carga, se muestra la cuenta BCP (soles) o la
+  // cuenta Scotiabank (dólares).
+  const cuentaBancariaBCP = `
     <div class="inline-block border border-red-600 p-1.5 bg-white text-red-600 text-[10px] font-medium uppercase tracking-wider shadow-sm leading-tight">
       <p class="mb-0.5">CUENTA DE AHORRO SOLES BCP</p>
       <p class="mb-0.5">BCP SOLES: <span class="font-bold">193-27543218-0-31</span></p>
@@ -265,6 +273,16 @@ export const procesarFacturacion = (html: string): { html: string; cliente: stri
       <p class="mb-0">Nombre: <span class="font-bold">ULICES RODRIGUEZ H.</span></p>
     </div>
   `;
+
+  const cuentaBancariaScotiabank = `
+    <div class="inline-block border border-red-600 p-1.5 bg-white text-red-600 text-[10px] font-medium uppercase tracking-wider shadow-sm leading-tight">
+      <p class="mb-0.5">CUENTA DE AHORRO DÓLARES SCOTIABANK</p>
+      <p class="mb-0.5">DÓLARES: <span class="font-bold">149-0042206</span></p>
+      <p class="mb-0">CCI: <span class="font-bold">009-087-211490042206-81</span></p>
+    </div>
+  `;
+
+  const cuentaBancaria = tipoPago === 'SCOTIABANK' ? cuentaBancariaScotiabank : cuentaBancariaBCP;
 
   // ---------- Contenido principal, SIN el bloque bancario ----------
   const htmlFinal = `

@@ -8,6 +8,7 @@ import { Buffer } from 'buffer';
 import VistaCarga from './components/VistaCarga';
 import VisorDocumento from './components/VisorDocumento';
 import { extractLegacyDocWithBold } from './utils/legacyDocBoldExtractor';
+import type { TipoPago } from './utils/procesadorWord';
 
 // Configure PDF.js worker (usa el worker incluido en el proyecto en vez de una CDN externa,
 // que puede fallar por falta de conexión o desajuste de versión y hacía que el PDF no se leyera).
@@ -88,12 +89,17 @@ async function extractLegacyDoc(arrayBuffer: ArrayBuffer): Promise<string | null
 export default function App() {
   const [docHtml, setDocHtml] = useState<string>('');
   const [tipoDocumento, setTipoDocumento] = useState<string>('COTIZACIÓN');
+  const [tipoPago, setTipoPago] = useState<TipoPago>('BCP');
+  const [nombreArchivo, setNombreArchivo] = useState<string>('');
 
   const handleFileUpload = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
     const isPDF = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-    
+    // El PDF descargado debe llamarse igual que el archivo original subido (pedido del
+    // usuario), no como el nombre de cliente detectado en el contenido.
+    setNombreArchivo(file.name.replace(/\.[^/.]+$/, ''));
+
     const reader = new FileReader();
     reader.onload = async (e) => {
       const arrayBuffer = e.target?.result as ArrayBuffer;
@@ -150,17 +156,21 @@ export default function App() {
     <main className="min-h-screen bg-slate-200 font-sans flex flex-col">
       {!docHtml ? (
         <div className="flex-1 flex items-center justify-center p-4">
-          <VistaCarga 
-            onFileUpload={handleFileUpload} 
+          <VistaCarga
+            onFileUpload={handleFileUpload}
             tipoDocumento={tipoDocumento}
             setTipoDocumento={setTipoDocumento}
+            tipoPago={tipoPago}
+            setTipoPago={setTipoPago}
           />
         </div>
       ) : (
-        <VisorDocumento 
-          contenidoWord={docHtml} 
-          onVolver={handleVolver} 
-          tipoDocumento={tipoDocumento} 
+        <VisorDocumento
+          contenidoWord={docHtml}
+          onVolver={handleVolver}
+          tipoDocumento={tipoDocumento}
+          nombreArchivo={nombreArchivo}
+          tipoPago={tipoPago}
         />
       )}
     </main>

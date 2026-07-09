@@ -1,14 +1,17 @@
 // src/components/VistaCarga.tsx
 import { type ChangeEvent } from 'react';
 import { UploadCloud, FileText } from 'lucide-react';
+import type { TipoPago } from '../utils/procesadorWord';
 
 interface VistaCargaProps {
   onFileUpload: (event: ChangeEvent<HTMLInputElement>) => void;
   tipoDocumento: string;
   setTipoDocumento: (tipo: string) => void;
+  tipoPago: TipoPago;
+  setTipoPago: (tipo: TipoPago) => void;
 }
 
-export default function VistaCarga({ onFileUpload, tipoDocumento, setTipoDocumento }: VistaCargaProps) {
+export default function VistaCarga({ onFileUpload, tipoDocumento, setTipoDocumento, tipoPago, setTipoPago }: VistaCargaProps) {
   return (
     <div className="w-full max-w-lg bg-white shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-500 border border-slate-300">
       <div className="bg-brand-dark px-6 py-4 flex items-center justify-between border-b border-slate-700">
@@ -41,10 +44,23 @@ export default function VistaCarga({ onFileUpload, tipoDocumento, setTipoDocumen
           </select>
         </div>
 
+        {/* SELECTOR DE CUENTA BANCARIA */}
+        <div className="w-full max-w-xs mb-6 text-left">
+          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">2. Selecciona la Cuenta Bancaria:</label>
+          <select
+            value={tipoPago}
+            onChange={(e) => setTipoPago(e.target.value as TipoPago)}
+            className="w-full p-3 border border-slate-300 bg-slate-50 text-brand-dark font-bold uppercase text-xs outline-none focus:border-brand-blue transition-colors cursor-pointer"
+          >
+            <option value="BCP">BCP (Soles)</option>
+            <option value="SCOTIABANK">Scotiabank (Dólares)</option>
+          </select>
+        </div>
+
         <p className="text-sm text-slate-500 mb-6 max-w-xs leading-relaxed">
-          2. Sube tu documento Word (.docx) para generar la estructura.
+          3. Sube tu documento Word (.docx) para generar la estructura.
         </p>
-        
+
         <label className="w-full max-w-xs relative group cursor-pointer flex items-center justify-center gap-2 bg-brand-blue text-white px-6 py-4 font-bold text-sm uppercase tracking-wider hover:bg-sky-600 transition-all duration-200 border border-transparent">
           Seleccionar Archivo
           <input

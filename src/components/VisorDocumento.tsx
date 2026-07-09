@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import BarraControles from './BarraControles';
 import PlantillaFactura from './PlantillaFactura';
-import { procesarFacturacion } from '../utils/procesadorWord';
+import { procesarFacturacion, type TipoPago } from '../utils/procesadorWord';
 import html2canvas from 'html2canvas-pro';
 import jsPDF from 'jspdf';
 
@@ -10,6 +10,8 @@ interface VisorProps {
   contenidoWord: string;
   onVolver: () => void;
   tipoDocumento: string;
+  nombreArchivo: string;
+  tipoPago: TipoPago;
 }
 
 // Espera a que las fuentes y todas las imágenes (ej. el logo) del elemento terminen de
@@ -30,6 +32,28 @@ async function esperarRecursosListos(element: HTMLElement) {
       setTimeout(listo, 3000);
     });
   }));
+}
+
+// html2canvas-pro clona el documento en un iframe oculto y, al hacerlo, vuelve a pedir
+// por red la hoja de estilos (Tailwind) en vez de reusar la que ya está aplicada en
+// pantalla. En computadoras donde esa segunda petición interna falla (bloqueada por
+// firewall/antivirus, o simplemente no llega a tiempo), el clon sale sin estilos -como
+// HTML plano- aunque la pantalla se vea perfecta. Para no depender de que esa petición
+// de red funcione, se lee el CSS que el navegador YA tiene parseado en la página visible
+// y se inyecta como texto plano directamente en el clon (ver onclone más abajo): así el
+// clon nunca necesita pedir nada por red.
+function extraerCssActual(): string {
+  let css = '';
+  for (const hoja of Array.from(document.styleSheets)) {
+    try {
+      for (const regla of Array.from(hoja.cssRules)) {
+        css += regla.cssText + '\n';
+      }
+    } catch {
+      // Hoja de otro origen (CORS): no se puede leer su cssRules, se omite.
+    }
+  }
+  return css;
 }
 
 // Verifica que la captura sí haya salido con estilos: muestrea el centro del recuadro
@@ -57,10 +81,10 @@ function capturaTieneEstilos(canvas: HTMLCanvasElement, element: HTMLElement): b
   return r < 100 && g < 100 && b < 100;
 }
 
-export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento }: VisorProps) {
+export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento, nombreArchivo, tipoPago }: VisorProps) {
   const [generando, setGenerando] = useState(false);
 
-  const { html: contenidoFinal, cliente, cuentaBancaria } = procesarFacturacion(contenidoWord);
+  const { html: contenidoFinal, cuentaBancaria } = procesarFacturacion(contenidoWord, tipoPago);
 
   const handleDownloadPDF = async () => {
     const element = document.getElementById('documento-a4');
@@ -69,17 +93,18 @@ export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento 
     setGenerando(true);
     await esperarRecursosListos(element);
 
-    // html2canvas-pro clona el documento en un iframe oculto y, al hacerlo, vuelve a
-    // pedir por red la hoja de estilos (Tailwind). En la primera descarga tras cargar
-    // la página esa segunda petición puede llegar antes de que el navegador termine de
-    // cachearla, y la clonación sale sin estilos (como HTML plano), aunque la pantalla
-    // se vea bien. Una captura de "calentamiento" descartable fuerza esa petición a
-    // resolverse en caché antes de la captura real, evitando tener que reintentar.
-    try {
-      await html2canvas(element, { scale: 1, useCORS: true, backgroundColor: '#ffffff', scrollY: 0 });
-    } catch { /* noop: si el calentamiento falla, seguimos con la captura real */ }
+    const cssTexto = extraerCssActual();
+    const inyectarCss = (clonedDoc: Document) => {
+      const estilo = clonedDoc.createElement('style');
+      estilo.textContent = cssTexto;
+      clonedDoc.head.appendChild(estilo);
+    };
 
-    const nombreLimpio = cliente.replace(/[^a-zA-Z0-9 ñÑ]/g, '').trim() || 'Documento';
+    // El PDF descargado debe llamarse igual que el archivo Word original subido, en
+    // mayúsculas, no como el nombre de cliente detectado en el contenido. Solo se
+    // quitan los caracteres inválidos para nombres de archivo en Windows (paréntesis
+    // y demás se conservan tal cual estaban en el archivo original).
+    const nombreLimpio = nombreArchivo.replace(/[\\/:*?"<>|]/g, '').trim().toUpperCase() || 'DOCUMENTO';
 
     const pdf = new jsPDF({
       unit: 'mm',
@@ -141,14 +166,15 @@ export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento 
       raiz.style.fontSize = paginasObjetivo === paginasNaturales ? '' : `${escalaElegida * 100}%`;
       void element.offsetHeight;
 
-      // Reintenta la captura real si sale sin estilos (ver capturaTieneEstilos), en vez
-      // de dejar que el usuario descargue un PDF roto y tenga que darse cuenta y volver
-      // a intentarlo manualmente.
+      // capturaTieneEstilos queda como red de seguridad adicional (ej. por si alguna
+      // imagen no cargó a tiempo), pero ya no depende de reintentar una petición de red
+      // para el CSS: onclone lo inyecta directo, sin red, en cada intento.
       let canvas = await html2canvas(element, {
         scale: 2,
         useCORS: true,
         backgroundColor: '#ffffff',
         scrollY: 0,
+        onclone: inyectarCss,
       });
 
       for (let intento = 0; intento < 2 && !capturaTieneEstilos(canvas, element); intento++) {
@@ -157,6 +183,7 @@ export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento 
           useCORS: true,
           backgroundColor: '#ffffff',
           scrollY: 0,
+          onclone: inyectarCss,
         });
       }
 
