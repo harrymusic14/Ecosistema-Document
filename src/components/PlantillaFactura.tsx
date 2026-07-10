@@ -30,7 +30,6 @@ export default function PlantillaFactura({ contenidoProcesado, cuentaBancaria, t
             <p className="text-xs font-bold text-brand-blue lowercase mt-0.5 mb-3">e-mail: ecosistemas_urh_sac@hotmail.com</p>
             
             <p className="text-[11px] font-bold text-slate-500 uppercase w-full max-w-[400px] border-t border-slate-300 pt-2">
-              "ESPECIALISTAS EN SISTEMAS DE RIEGO, GASFITERÍA, MANTENIMIENTO Y SERVICIOS GENERALES."
             </p>
           </div>
           
