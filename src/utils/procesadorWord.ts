@@ -297,7 +297,7 @@ export const procesarFacturacion = (html: string, tipoPago: TipoPago = 'BCP'): {
       <thead class="bg-brand-dark text-white text-xs uppercase tracking-wider">
         <tr>
           <th class="p-3 border border-slate-700 w-16 text-center">Cant.</th>
-          <th class="p-3 border border-slate-700">Descripción / Justificación del Costo</th>
+          <th class="p-3 border border-slate-700">Descripción</th>
           <th class="p-3 border border-slate-700 w-32 text-center">Precio</th>
         </tr>
       </thead>
