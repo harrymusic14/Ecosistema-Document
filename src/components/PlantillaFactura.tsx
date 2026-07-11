@@ -48,11 +48,15 @@ export default function PlantillaFactura({ contenidoProcesado, cuentaBancaria, t
           dangerouslySetInnerHTML={{ __html: contenidoProcesado }}
         />
 
-        {/* Bloque de cuenta bancaria: fijo, justo encima del pie de página */}
-        <div
-          className="mt-6 mb-2 print-avoid-break"
-          dangerouslySetInnerHTML={{ __html: cuentaBancaria }}
-        />
+        {/* Bloque de cuenta bancaria: fijo, justo encima del pie de página. Si no se
+            eligió cuenta ("Ninguno"), no se renderiza nada -ni el div vacío- para no
+            dejar un hueco en blanco antes del pie de página. */}
+        {cuentaBancaria && (
+          <div
+            className="mt-6 mb-2 print-avoid-break"
+            dangerouslySetInnerHTML={{ __html: cuentaBancaria }}
+          />
+        )}
 
         <footer className="mt-auto pt-4 text-center border-t-2 border-slate-300">
           <p className="text-[10px] font-bold text-slate-500 uppercase">Documento sujeto a verificación y aprobación final.</p>

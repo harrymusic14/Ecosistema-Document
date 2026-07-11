@@ -1,5 +1,5 @@
 // src/utils/procesadorWord.ts
-export type TipoPago = 'BCP' | 'SCOTIABANK';
+export type TipoPago = 'BCP' | 'SCOTIABANK' | 'NINGUNO';
 
 export const procesarFacturacion = (html: string, tipoPago: TipoPago = 'BCP'): { html: string; cliente: string; cuentaBancaria: string } => {
   const tempDiv = document.createElement('div');
@@ -263,8 +263,8 @@ export const procesarFacturacion = (html: string, tipoPago: TipoPago = 'BCP'): {
     </tr>` : '';
 
   // ---------- Bloque bancario, ahora SEPARADO del resto del contenido ----------
-  // Según el tipo de pago elegido en la carga, se muestra la cuenta BCP (soles) o la
-  // cuenta Scotiabank (dólares).
+  // Según el tipo de pago elegido en la carga, se muestra la cuenta BCP (soles), la
+  // cuenta Scotiabank (dólares), o ninguna (tipoPago === 'NINGUNO').
   const cuentaBancariaBCP = `
     <div class="inline-block border border-red-600 p-1.5 bg-white text-red-600 text-[10px] font-medium uppercase tracking-wider shadow-sm leading-tight">
       <p class="mb-0.5">CUENTA DE AHORRO SOLES BCP</p>
@@ -282,7 +282,10 @@ export const procesarFacturacion = (html: string, tipoPago: TipoPago = 'BCP'): {
     </div>
   `;
 
-  const cuentaBancaria = tipoPago === 'SCOTIABANK' ? cuentaBancariaScotiabank : cuentaBancariaBCP;
+  const cuentaBancaria =
+    tipoPago === 'NINGUNO' ? '' :
+    tipoPago === 'SCOTIABANK' ? cuentaBancariaScotiabank :
+    cuentaBancariaBCP;
 
   // ---------- Contenido principal, SIN el bloque bancario ----------
   const htmlFinal = `

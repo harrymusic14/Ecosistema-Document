@@ -54,6 +54,7 @@ export default function VistaCarga({ onFileUpload, tipoDocumento, setTipoDocumen
           >
             <option value="BCP">BCP (Soles)</option>
             <option value="SCOTIABANK">Scotiabank (Dólares)</option>
+            <option value="NINGUNO">Ninguno</option>
           </select>
         </div>
 
