@@ -1,8 +1,8 @@
 // src/components/VisorDocumento.tsx
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import BarraControles from './BarraControles';
 import PlantillaFactura from './PlantillaFactura';
-import { procesarFacturacion, type TipoPago } from '../utils/procesadorWord';
+import { procesarFacturacion, type TipoPago, type FilaDocumento } from '../utils/procesadorWord';
 import html2canvas from 'html2canvas-pro';
 import jsPDF from 'jspdf';
 
@@ -12,6 +12,16 @@ interface VisorProps {
   tipoDocumento: string;
   nombreArchivo: string;
   tipoPago: TipoPago;
+}
+
+// Todo el contenido editable del documento (lo que NO cambia es el estilo/plantilla).
+// Vive en VisorDocumento -no en PlantillaFactura- para que el historial de deshacer/
+// rehacer y los botones de la barra de controles compartan el mismo estado.
+export interface EstadoDocumento {
+  cliente: string;
+  fecha: string;
+  filas: FilaDocumento[];
+  total: string;
 }
 
 // Espera a que las fuentes y todas las imágenes (ej. el logo) del elemento terminen de
@@ -84,7 +94,90 @@ function capturaTieneEstilos(canvas: HTMLCanvasElement, element: HTMLElement): b
 export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento, nombreArchivo, tipoPago }: VisorProps) {
   const [generando, setGenerando] = useState(false);
 
-  const { html: contenidoFinal, cuentaBancaria } = procesarFacturacion(contenidoWord, tipoPago);
+  // procesarFacturacion se corre una sola vez (al montar) para extraer el punto de
+  // partida; desde ahí en adelante todo lo editable vive en `estado`, no se vuelve a
+  // reprocesar el Word original. Lo que no es editable (cuenta bancaria, IGV/Subtotal)
+  // queda aparte, en `datosBase`.
+  const [datosBase] = useState(() => procesarFacturacion(contenidoWord, tipoPago));
+  const [estado, setEstado] = useState<EstadoDocumento>(() => ({
+    cliente: datosBase.cliente,
+    fecha: datosBase.fecha,
+    filas: datosBase.filas,
+    total: datosBase.totalTexto,
+  }));
+  const [pasado, setPasado] = useState<EstadoDocumento[]>([]);
+  const [futuro, setFuturo] = useState<EstadoDocumento[]>([]);
+
+  // Aplica un cambio y lo deja en el historial. Si el valor no cambió en realidad (ej.
+  // el usuario hizo clic en un campo y salió sin escribir nada), no se apila un paso de
+  // historial vacío.
+  const confirmarCambio = (nuevo: EstadoDocumento) => {
+    setEstado(actual => {
+      if (JSON.stringify(actual) === JSON.stringify(nuevo)) return actual;
+      setPasado(p => [...p, actual]);
+      setFuturo([]);
+      return nuevo;
+    });
+  };
+
+  const deshacer = () => {
+    setPasado(p => {
+      if (p.length === 0) return p;
+      const anterior = p[p.length - 1];
+      setFuturo(f => [...f, estado]);
+      setEstado(anterior);
+      return p.slice(0, -1);
+    });
+  };
+
+  const rehacer = () => {
+    setFuturo(f => {
+      if (f.length === 0) return f;
+      const siguiente = f[f.length - 1];
+      setPasado(p => [...p, estado]);
+      setEstado(siguiente);
+      return f.slice(0, -1);
+    });
+  };
+
+  // Ctrl+Z / Ctrl+Y (y Ctrl+Shift+Z como alterno de rehacer) funcionan en cualquier
+  // parte de la página, incluso con el foco dentro de una celda editable: se bloquea el
+  // undo nativo del navegador (que solo conoce esa celda) para que ambos usen el mismo
+  // historial global del documento.
+  useEffect(() => {
+    const alPresionarTecla = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const tecla = e.key.toLowerCase();
+      if (tecla === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        deshacer();
+      } else if (tecla === 'y' || (tecla === 'z' && e.shiftKey)) {
+        e.preventDefault();
+        rehacer();
+      }
+    };
+    window.addEventListener('keydown', alPresionarTecla);
+    return () => window.removeEventListener('keydown', alPresionarTecla);
+  });
+
+  const actualizarCliente = (html: string) => confirmarCambio({ ...estado, cliente: html });
+  const actualizarFecha = (html: string) => confirmarCambio({ ...estado, fecha: html });
+  const actualizarTotal = (html: string) => confirmarCambio({ ...estado, total: html });
+  const actualizarFila = (id: string, campo: 'html' | 'precio', valor: string) =>
+    confirmarCambio({ ...estado, filas: estado.filas.map(f => (f.id === id ? { ...f, [campo]: valor } : f)) });
+
+  const contadorNuevaFila = useRef(0);
+  const agregarFila = () => {
+    contadorNuevaFila.current += 1;
+    confirmarCambio({
+      ...estado,
+      filas: [...estado.filas, { id: `fila-nueva-${contadorNuevaFila.current}`, html: '', precio: '', precioNegrita: false }],
+    });
+  };
+  const quitarFila = (id: string) => {
+    if (estado.filas.length <= 1) return;
+    confirmarCambio({ ...estado, filas: estado.filas.filter(f => f.id !== id) });
+  };
 
   const handleDownloadPDF = async () => {
     const element = document.getElementById('documento-a4');
@@ -169,12 +262,18 @@ export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento,
       // capturaTieneEstilos queda como red de seguridad adicional (ej. por si alguna
       // imagen no cargó a tiempo), pero ya no depende de reintentar una petición de red
       // para el CSS: onclone lo inyecta directo, sin red, en cada intento.
+      // ignoreElements excluye los controles de edición (botones agregar/quitar fila,
+      // clase "pdf-ocultar") de la captura: son solo ayuda de edición en pantalla, no
+      // deben aparecer en el PDF final.
+      const ignorarControlesEdicion = (el: Element) => el.classList.contains('pdf-ocultar');
+
       let canvas = await html2canvas(element, {
         scale: 2,
         useCORS: true,
         backgroundColor: '#ffffff',
         scrollY: 0,
         onclone: inyectarCss,
+        ignoreElements: ignorarControlesEdicion,
       });
 
       for (let intento = 0; intento < 2 && !capturaTieneEstilos(canvas, element); intento++) {
@@ -184,6 +283,7 @@ export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento,
           backgroundColor: '#ffffff',
           scrollY: 0,
           onclone: inyectarCss,
+          ignoreElements: ignorarControlesEdicion,
         });
       }
 
@@ -221,12 +321,25 @@ export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento,
         onVolver={onVolver}
         onDownload={handleDownloadPDF}
         generando={generando}
+        onDeshacer={deshacer}
+        onRehacer={rehacer}
+        puedeDeshacer={pasado.length > 0}
+        puedeRehacer={futuro.length > 0}
       />
       <div className="w-full flex justify-center pb-12 pt-4 px-4 overflow-y-auto">
         <PlantillaFactura
-          contenidoProcesado={contenidoFinal}
-          cuentaBancaria={cuentaBancaria}
+          estado={estado}
+          cuentaBancaria={datosBase.cuentaBancaria}
+          tieneIgv={datosBase.tieneIgv}
+          subtotalTexto={datosBase.subtotalTexto}
+          igvTexto={datosBase.igvTexto}
           tipoDocumento={tipoDocumento}
+          onCambiarCliente={actualizarCliente}
+          onCambiarFecha={actualizarFecha}
+          onCambiarTotal={actualizarTotal}
+          onCambiarFila={actualizarFila}
+          onAgregarFila={agregarFila}
+          onQuitarFila={quitarFila}
         />
       </div>
     </div>

@@ -1,7 +1,25 @@
 // src/utils/procesadorWord.ts
 export type TipoPago = 'BCP' | 'SCOTIABANK' | 'NINGUNO';
 
-export const procesarFacturacion = (html: string, tipoPago: TipoPago = 'BCP'): { html: string; cliente: string; cuentaBancaria: string } => {
+export interface FilaDocumento {
+  id: string;
+  html: string;
+  precio: string;
+  precioNegrita: boolean;
+}
+
+export interface DatosFacturacion {
+  cliente: string;
+  fecha: string;
+  filas: FilaDocumento[];
+  totalTexto: string;
+  subtotalTexto: string;
+  igvTexto: string;
+  tieneIgv: boolean;
+  cuentaBancaria: string;
+}
+
+export const procesarFacturacion = (html: string, tipoPago: TipoPago = 'BCP'): DatosFacturacion => {
   const tempDiv = document.createElement('div');
   tempDiv.innerHTML = html;
 
@@ -245,22 +263,12 @@ export const procesarFacturacion = (html: string, tipoPago: TipoPago = 'BCP'): {
     filasDescripcion.push({ html: 'SERVICIO GENERAL', precio: null, precioNegrita: false });
   }
 
-  const filasTabla = filasDescripcion.map((linea, idx) => `
-        <tr class="border-b border-slate-300 print-avoid-break">
-          ${idx === 0 ? `<td class="py-1 px-4 text-center font-bold text-sm border-r border-slate-300 align-top" rowspan="${filasDescripcion.length}">01</td>` : ''}
-          <td class="py-1 px-4 text-xs uppercase border-r border-slate-300 align-top leading-relaxed">${linea.html}</td>
-          <td class="py-1 px-4 text-center text-sm text-slate-900 align-top${linea.precioNegrita ? ' font-bold' : ''}">${linea.precio ?? ''}</td>
-        </tr>`).join('');
-
-  const filasMontos = tieneIgv ? `
-    <tr class="border-b border-slate-300 bg-slate-50">
-      <td class="p-2 text-xs font-bold text-slate-600 uppercase border-r border-slate-300 tracking-wider">Subtotal</td>
-      <td class="p-2 text-sm font-bold text-slate-900 w-32">${subtotalTexto}</td>
-    </tr>
-    <tr class="border-b border-slate-300 bg-slate-50">
-      <td class="p-2 text-xs font-bold text-slate-600 uppercase border-r border-slate-300 tracking-wider">I.G.V. (18%)</td>
-      <td class="p-2 text-sm font-bold text-slate-900">${igvTexto}</td>
-    </tr>` : '';
+  const filas: FilaDocumento[] = filasDescripcion.map((linea, idx) => ({
+    id: `fila-inicial-${idx}`,
+    html: linea.html,
+    precio: linea.precio ?? '',
+    precioNegrita: linea.precioNegrita,
+  }));
 
   // ---------- Bloque bancario, ahora SEPARADO del resto del contenido ----------
   // Según el tipo de pago elegido en la carga, se muestra la cuenta BCP (soles), la
@@ -287,37 +295,5 @@ export const procesarFacturacion = (html: string, tipoPago: TipoPago = 'BCP'): {
     tipoPago === 'SCOTIABANK' ? cuentaBancariaScotiabank :
     cuentaBancariaBCP;
 
-  // ---------- Contenido principal, SIN el bloque bancario ----------
-  const htmlFinal = `
-    <div class="grid grid-cols-[130px_1fr] border border-slate-300 overflow-hidden mb-5">
-      <div class="bg-slate-100 p-2.5 text-xs font-bold uppercase text-slate-700 border-r border-slate-300 flex items-center">Señor(es):</div>
-      <div class="p-2.5 text-sm font-bold text-slate-900">${cliente}</div>
-      <div class="bg-slate-100 p-2.5 text-xs font-bold uppercase text-slate-700 border-r border-t border-slate-300 flex items-center">Fecha:</div>
-      <div class="p-2.5 text-sm font-bold uppercase text-slate-900 border-t border-slate-300">${fecha}</div>
-    </div>
-    
-    <table class="w-full text-left border-collapse border border-slate-300 mb-0">
-      <thead class="bg-brand-dark text-white text-xs uppercase tracking-wider">
-        <tr>
-          <th class="p-3 border border-slate-700 w-16 text-center">Cant.</th>
-          <th class="p-3 border border-slate-700">Descripción</th>
-          <th class="p-3 border border-slate-700 w-32 text-center">Precio</th>
-        </tr>
-      </thead>
-      <tbody class="text-slate-800 bg-white">${filasTabla}
-      </tbody>
-    </table>
-    
-    <div class="flex justify-end mt-4 mb-4 print-avoid-break">
-      <table class="w-72 text-right border-collapse border border-slate-300 shadow-sm overflow-hidden">
-        ${filasMontos}
-        <tr class="bg-brand-dark text-white">
-          <td class="p-3 text-xs font-bold uppercase border-r border-slate-700 tracking-widest">Total</td>
-          <td class="p-3 text-sm font-bold">${totalTexto}</td>
-        </tr>
-      </table>
-    </div>
-  `;
-
-  return { html: htmlFinal, cliente, cuentaBancaria };
+  return { cliente, fecha, filas, totalTexto, subtotalTexto, igvTexto, tieneIgv, cuentaBancaria };
 };
