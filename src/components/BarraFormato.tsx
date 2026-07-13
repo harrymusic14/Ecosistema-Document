@@ -18,6 +18,7 @@ const COLORES_RESALTADO = [
 
 const COLORES_TEXTO = [
   { nombre: 'Predeterminado', valor: 'inherit' },
+  { nombre: 'Negro', valor: '#000000' },
   { nombre: 'Rojo', valor: '#dc2626' },
   { nombre: 'Azul', valor: '#2563eb' },
   { nombre: 'Verde', valor: '#16a34a' },
@@ -134,8 +135,8 @@ export default function BarraFormato({ contenedorRef }: { contenedorRef: RefObje
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => aplicar('foreColor', c.valor)}
           title={`Color de letra: ${c.nombre}`}
-          style={{ color: c.valor === 'inherit' ? '#ffffff' : c.valor }}
-          className="w-5 h-5 text-sm font-black leading-none hover:bg-slate-700 transition-colors"
+          style={{ color: c.valor === 'inherit' ? '#475569' : c.valor }}
+          className="w-5 h-5 text-sm font-black leading-none bg-white hover:bg-slate-200 transition-colors flex items-center justify-center"
         >
           A
         </button>
