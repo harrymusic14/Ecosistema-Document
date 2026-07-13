@@ -20,6 +20,7 @@ interface VisorProps {
 export interface EstadoDocumento {
   cliente: string;
   fecha: string;
+  cantidad: string;
   filas: FilaDocumento[];
   total: string;
 }
@@ -102,6 +103,7 @@ export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento,
   const [estado, setEstado] = useState<EstadoDocumento>(() => ({
     cliente: datosBase.cliente,
     fecha: datosBase.fecha,
+    cantidad: '01',
     filas: datosBase.filas,
     total: datosBase.totalTexto,
   }));
@@ -162,6 +164,7 @@ export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento,
 
   const actualizarCliente = (html: string) => confirmarCambio({ ...estado, cliente: html });
   const actualizarFecha = (html: string) => confirmarCambio({ ...estado, fecha: html });
+  const actualizarCantidad = (html: string) => confirmarCambio({ ...estado, cantidad: html });
   const actualizarTotal = (html: string) => confirmarCambio({ ...estado, total: html });
   const actualizarFila = (id: string, campo: 'html' | 'precio', valor: string) =>
     confirmarCambio({ ...estado, filas: estado.filas.map(f => (f.id === id ? { ...f, [campo]: valor } : f)) });
@@ -336,6 +339,7 @@ export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento,
           tipoDocumento={tipoDocumento}
           onCambiarCliente={actualizarCliente}
           onCambiarFecha={actualizarFecha}
+          onCambiarCantidad={actualizarCantidad}
           onCambiarTotal={actualizarTotal}
           onCambiarFila={actualizarFila}
           onAgregarFila={agregarFila}

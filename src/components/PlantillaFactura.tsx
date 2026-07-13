@@ -15,6 +15,7 @@ interface PlantillaFacturaProps {
   tipoDocumento: string;
   onCambiarCliente: (html: string) => void;
   onCambiarFecha: (html: string) => void;
+  onCambiarCantidad: (html: string) => void;
   onCambiarTotal: (html: string) => void;
   onCambiarFila: (id: string, campo: 'html' | 'precio', valor: string) => void;
   onAgregarFila: () => void;
@@ -41,7 +42,7 @@ function CeldaEditable({ className, html, onCommit }: { className: string; html:
 
 export default function PlantillaFactura({
   estado, cuentaBancaria, tieneIgv, subtotalTexto, igvTexto, tipoDocumento,
-  onCambiarCliente, onCambiarFecha, onCambiarTotal, onCambiarFila, onAgregarFila, onQuitarFila,
+  onCambiarCliente, onCambiarFecha, onCambiarCantidad, onCambiarTotal, onCambiarFila, onAgregarFila, onQuitarFila,
 }: PlantillaFacturaProps) {
   const filas: FilaDocumento[] = estado.filas;
   const contenedorRef = useRef<HTMLDivElement>(null);
@@ -106,7 +107,13 @@ export default function PlantillaFactura({
                 {filas.map((fila, idx) => (
                   <tr key={fila.id} className="relative border-b border-slate-300 print-avoid-break">
                     {idx === 0 && (
-                      <td className="py-1 px-4 text-center font-bold text-sm border-r border-slate-300 align-top" rowSpan={filas.length}>01</td>
+                      <td className="p-0 text-center font-bold text-sm border-r border-slate-300 align-top" rowSpan={filas.length}>
+                        <CeldaEditable
+                          className="py-1 px-4 outline-none focus:bg-sky-50"
+                          html={estado.cantidad}
+                          onCommit={onCambiarCantidad}
+                        />
+                      </td>
                     )}
                     <td className="p-0 text-xs uppercase border-r border-slate-300 align-top leading-relaxed">
                       <CeldaEditable
@@ -129,7 +136,7 @@ export default function PlantillaFactura({
                         type="button"
                         onClick={() => onQuitarFila(fila.id)}
                         title="Quitar fila"
-                        className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-red-600 transition-colors"
+                        className="absolute -right-7 top-1/2 -translate-y-1/2 text-slate-400 hover:text-red-600 transition-colors"
                       >
                         <X size={14} />
                       </button>
