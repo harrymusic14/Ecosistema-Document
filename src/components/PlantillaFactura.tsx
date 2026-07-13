@@ -1,10 +1,9 @@
 // src/components/PlantillaFactura.tsx
-import { useRef } from 'react';
+import type { RefObject } from 'react';
 import { X, Plus } from 'lucide-react';
 import logo from '../assets/logo.png';
 import type { FilaDocumento } from '../utils/procesadorWord';
 import type { EstadoDocumento } from './VisorDocumento';
-import BarraFormato from './BarraFormato';
 
 interface PlantillaFacturaProps {
   estado: EstadoDocumento;
@@ -13,6 +12,7 @@ interface PlantillaFacturaProps {
   subtotalTexto: string;
   igvTexto: string;
   tipoDocumento: string;
+  contenedorRef: RefObject<HTMLDivElement | null>;
   onCambiarCliente: (html: string) => void;
   onCambiarFecha: (html: string) => void;
   onCambiarCantidad: (html: string) => void;
@@ -41,15 +41,13 @@ function CeldaEditable({ className, html, onCommit }: { className: string; html:
 }
 
 export default function PlantillaFactura({
-  estado, cuentaBancaria, tieneIgv, subtotalTexto, igvTexto, tipoDocumento,
+  estado, cuentaBancaria, tieneIgv, subtotalTexto, igvTexto, tipoDocumento, contenedorRef,
   onCambiarCliente, onCambiarFecha, onCambiarCantidad, onCambiarTotal, onCambiarFila, onAgregarFila, onQuitarFila,
 }: PlantillaFacturaProps) {
   const filas: FilaDocumento[] = estado.filas;
-  const contenedorRef = useRef<HTMLDivElement>(null);
 
   return (
     <div ref={contenedorRef} className="w-full max-w-[210mm] mx-auto my-8 shadow-2xl bg-white">
-      <BarraFormato contenedorRef={contenedorRef} />
 
       <article
         id="documento-a4"

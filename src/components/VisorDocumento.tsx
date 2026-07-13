@@ -169,6 +169,11 @@ export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento,
   const actualizarFila = (id: string, campo: 'html' | 'precio', valor: string) =>
     confirmarCambio({ ...estado, filas: estado.filas.map(f => (f.id === id ? { ...f, [campo]: valor } : f)) });
 
+  // Compartido entre BarraControles (donde vive la barra de formato fija) y
+  // PlantillaFactura (el documento en sí): así la barra de formato sabe qué cuenta como
+  // "el documento" sin importar en qué celda/tabla esté el cursor.
+  const contenedorRef = useRef<HTMLDivElement>(null);
+
   const contadorNuevaFila = useRef(0);
   const agregarFila = () => {
     contadorNuevaFila.current += 1;
@@ -328,6 +333,7 @@ export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento,
         onRehacer={rehacer}
         puedeDeshacer={pasado.length > 0}
         puedeRehacer={futuro.length > 0}
+        contenedorRef={contenedorRef}
       />
       <div className="w-full flex justify-center pb-12 pt-4 px-4 overflow-y-auto">
         <PlantillaFactura
@@ -337,6 +343,7 @@ export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento,
           subtotalTexto={datosBase.subtotalTexto}
           igvTexto={datosBase.igvTexto}
           tipoDocumento={tipoDocumento}
+          contenedorRef={contenedorRef}
           onCambiarCliente={actualizarCliente}
           onCambiarFecha={actualizarFecha}
           onCambiarCantidad={actualizarCantidad}
