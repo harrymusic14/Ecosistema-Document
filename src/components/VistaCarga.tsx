@@ -41,6 +41,7 @@ export default function VistaCarga({ onFileUpload, tipoDocumento, setTipoDocumen
           >
             <option value="COTIZACIÓN">Cotización</option>
             <option value="LIQUIDACIÓN DE SERVICIO">Liquidación de Servicio</option>
+            <option value="ESTADO DE CUENTA">Estado de Cuenta</option>
           </select>
         </div>
 
