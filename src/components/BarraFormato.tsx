@@ -8,7 +8,7 @@
 // simple y confiable de aplicar formato dentro de un contentEditable sin reimplementar a
 // mano el manejo de rangos/selecciones superpuestas.
 import { useEffect, useRef, useState, type RefObject } from 'react';
-import { Bold, Italic, Highlighter } from 'lucide-react';
+import { Bold, Italic, Highlighter, List, ListOrdered } from 'lucide-react';
 
 const COLORES_RESALTADO = [
   { nombre: 'Amarillo', valor: '#fef08a' },
@@ -106,6 +106,27 @@ export default function BarraFormato({ contenedorRef }: { contenedorRef: RefObje
         className={`p-1.5 text-slate-700 hover:bg-slate-200 transition-colors ${cursivaActiva ? 'bg-brand-blue text-white' : ''}`}
       >
         <Italic size={14} />
+      </button>
+
+      <div className="w-px h-5 bg-slate-300 mx-0.5" />
+
+      <button
+        type="button"
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => aplicar('insertUnorderedList')}
+        title="Lista con viñetas"
+        className="p-1.5 text-slate-700 hover:bg-slate-200 transition-colors"
+      >
+        <List size={14} />
+      </button>
+      <button
+        type="button"
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => aplicar('insertOrderedList')}
+        title="Lista numerada"
+        className="p-1.5 text-slate-700 hover:bg-slate-200 transition-colors"
+      >
+        <ListOrdered size={14} />
       </button>
 
       <div className="w-px h-5 bg-slate-300 mx-0.5" />

@@ -6,6 +6,13 @@ export interface FilaDocumento {
   html: string;
   precio: string;
   precioNegrita: boolean;
+  // Marca las filas "PRECIO TOTAL...S/ XXX" de una cotización con varias opciones
+  // (OPCION 1, OPCION 2...): en vez de una fila normal de tabla, se pintan como una
+  // barra de total destacada justo debajo de la descripción de esa opción.
+  esTotalOpcion?: boolean;
+  // Salto de hoja manual: fuerza que esta fila empiece una hoja nueva (botón "Agregar
+  // hoja"), independiente de si la fila anterior aún tenía espacio libre.
+  saltoPaginaAntes?: boolean;
 }
 
 export interface DatosFacturacion {
@@ -17,6 +24,10 @@ export interface DatosFacturacion {
   igvTexto: string;
   tieneIgv: boolean;
   cuentaBancaria: string;
+  // true cuando el Word trae varias opciones de precio (cada una con su propio
+  // "PRECIO TOTAL"): en ese caso el total general de abajo no representa nada -cada
+  // opción ya muestra el suyo en su propia fila- así que la plantilla lo oculta.
+  esMultiOpcion: boolean;
 }
 
 export const procesarFacturacion = (html: string, tipoPago: TipoPago = 'BCP'): DatosFacturacion => {
@@ -66,6 +77,22 @@ export const procesarFacturacion = (html: string, tipoPago: TipoPago = 'BCP'): D
   const tieneIgv = /IGV/.test(textoCompleto) && !noIncluyeIgv;
   let nextIsClient = false;
   const nodesToRemove: HTMLElement[] = [];
+
+  const PRICE_LINE_REGEX = /(?:PRECIO\s*(?:TOTAL|GLOBAL)|TOTAL|MONTO|COSTO).*?(?:S\s*\/|\$|SOLES)?\s*([\d,]+(?:\.\d{2})?)/;
+
+  // Cotizaciones con varias opciones de precio (OPCION 1, OPCION 2, OPCION 3...) traen
+  // una línea "PRECIO TOTAL...S/ XXX" por cada opción, no una sola. Si se tratara cada
+  // una como "el" total del documento (como en una cotización de una sola opción), el
+  // valor de la última opción encontrada pisaría al de las anteriores y además las
+  // líneas de precio desaparecerían de la tabla (se eliminan al extraer el total). Para
+  // no perder ninguna opción, primero se cuentan cuántas líneas con esta forma hay en
+  // el documento: si hay más de una, ninguna se trata como total único -se dejan pasar
+  // tal cual hacia la tabla de descripción (más abajo), donde cada una queda como su
+  // propia fila con su propio precio, igual que cualquier línea "título....precio".
+  const esMultiOpcion = Array.from(tempDiv.children).filter(child => {
+    const text = child.textContent?.trim() || '';
+    return !!text && PRICE_LINE_REGEX.test(text.toUpperCase());
+  }).length > 1;
 
   Array.from(tempDiv.children).forEach(child => {
     const text = child.textContent?.trim() || '';
@@ -134,8 +161,14 @@ export const procesarFacturacion = (html: string, tipoPago: TipoPago = 'BCP'): D
       return;
     }
 
-    const priceMatch = upperText.match(/(?:PRECIO\s*(?:TOTAL|GLOBAL)|TOTAL|MONTO|COSTO).*?(?:S\s*\/|\$|SOLES)?\s*([\d,]+(?:\.\d{2})?)/);
+    const priceMatch = upperText.match(PRICE_LINE_REGEX);
     if (priceMatch) {
+      if (esMultiOpcion) {
+        // No se fusiona en un total único: se deja intacta para que la etapa de
+        // filasDescripcion (más abajo) la reconozca como una fila normal de
+        // título+precio, conservando el precio de CADA opción en la tabla.
+        return;
+      }
       const numericTotal = parseFloat(priceMatch[1].replace(/,/g, ''));
       if (!isNaN(numericTotal)) {
         totalTexto = `${simboloMoneda} ${numericTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -160,8 +193,8 @@ export const procesarFacturacion = (html: string, tipoPago: TipoPago = 'BCP'): D
 
   // Fallback global: si por culpa de extraer texto bruto no encontró el precio, búscalo en todo el documento.
   const fullText = tempDiv.textContent?.replace(/\s+/g, ' ').toUpperCase() || '';
-  if (totalTexto === `${simboloMoneda} 0.00`) {
-    const fallbackPrice = fullText.match(/(?:PRECIO\s*(?:TOTAL|GLOBAL)|TOTAL|MONTO|COSTO).*?(?:S\s*\/|\$|SOLES)?\s*([\d,]+(?:\.\d{2})?)/);
+  if (totalTexto === `${simboloMoneda} 0.00` && !esMultiOpcion) {
+    const fallbackPrice = fullText.match(PRICE_LINE_REGEX);
     if (fallbackPrice) {
       const num = parseFloat(fallbackPrice[1].replace(/,/g, ''));
       if (!isNaN(num)) {
@@ -236,6 +269,11 @@ export const procesarFacturacion = (html: string, tipoPago: TipoPago = 'BCP'): D
   const filasDescripcion = Array.from(tempDiv.children).map(child => {
     const text = child.textContent?.trim() || '';
     const match = text.match(dotLeaderRegex);
+    // Estas son exactamente las mismas líneas que en modo multi-opción no se
+    // extrajeron arriba como total único (ver esMultiOpcion): "PRECIO TOTAL...S/ XXX"
+    // de cada OPCION. Al llegar hasta acá se marcan para que la plantilla las pinte
+    // como su propia barra de total, en vez de una fila más de la tabla.
+    const esTotalOpcion = esMultiOpcion && PRICE_LINE_REGEX.test(text.toUpperCase());
     if (match) {
       const crudo = child.textContent || '';
       const espaciosIniciales = crudo.length - crudo.trimStart().length;
@@ -254,13 +292,14 @@ export const procesarFacturacion = (html: string, tipoPago: TipoPago = 'BCP'): D
         html: eraNegrita ? `<span class="font-bold">${titulo}</span>` : titulo,
         precio: match[2].trim(),
         precioNegrita,
+        esTotalOpcion,
       };
     }
-    return { html: child.innerHTML, precio: null as string | null, precioNegrita: false };
+    return { html: child.innerHTML, precio: null as string | null, precioNegrita: false, esTotalOpcion };
   });
 
   if (filasDescripcion.length === 0) {
-    filasDescripcion.push({ html: 'SERVICIO GENERAL', precio: null, precioNegrita: false });
+    filasDescripcion.push({ html: 'SERVICIO GENERAL', precio: null, precioNegrita: false, esTotalOpcion: false });
   }
 
   const filas: FilaDocumento[] = filasDescripcion.map((linea, idx) => ({
@@ -268,6 +307,7 @@ export const procesarFacturacion = (html: string, tipoPago: TipoPago = 'BCP'): D
     html: linea.html,
     precio: linea.precio ?? '',
     precioNegrita: linea.precioNegrita,
+    esTotalOpcion: linea.esTotalOpcion,
   }));
 
   // ---------- Bloque bancario, ahora SEPARADO del resto del contenido ----------
@@ -295,5 +335,5 @@ export const procesarFacturacion = (html: string, tipoPago: TipoPago = 'BCP'): D
     tipoPago === 'SCOTIABANK' ? cuentaBancariaScotiabank :
     cuentaBancariaBCP;
 
-  return { cliente, fecha, filas, totalTexto, subtotalTexto, igvTexto, tieneIgv, cuentaBancaria };
+  return { cliente, fecha, filas, totalTexto, subtotalTexto, igvTexto, tieneIgv, cuentaBancaria, esMultiOpcion };
 };

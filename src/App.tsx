@@ -152,12 +152,18 @@ export default function App() {
 
   const handleVolver = () => setDocHtml('');
 
+  const handleCrearNueva = () => {
+    setNombreArchivo('NUEVA PLANTILLA');
+    setDocHtml('<p></p>');
+  };
+
   return (
     <main className="min-h-screen bg-slate-200 font-sans flex flex-col">
       {!docHtml ? (
         <div className="flex-1 flex items-center justify-center p-4">
           <VistaCarga
             onFileUpload={handleFileUpload}
+            onCrearNueva={handleCrearNueva}
             tipoDocumento={tipoDocumento}
             setTipoDocumento={setTipoDocumento}
             tipoPago={tipoPago}

@@ -1,17 +1,18 @@
 // src/components/VistaCarga.tsx
 import { type ChangeEvent } from 'react';
-import { UploadCloud, FileText } from 'lucide-react';
+import { UploadCloud, FileText, FilePlus2 } from 'lucide-react';
 import type { TipoPago } from '../utils/procesadorWord';
 
 interface VistaCargaProps {
   onFileUpload: (event: ChangeEvent<HTMLInputElement>) => void;
+  onCrearNueva: () => void;
   tipoDocumento: string;
   setTipoDocumento: (tipo: string) => void;
   tipoPago: TipoPago;
   setTipoPago: (tipo: TipoPago) => void;
 }
 
-export default function VistaCarga({ onFileUpload, tipoDocumento, setTipoDocumento, tipoPago, setTipoPago }: VistaCargaProps) {
+export default function VistaCarga({ onFileUpload, onCrearNueva, tipoDocumento, setTipoDocumento, tipoPago, setTipoPago }: VistaCargaProps) {
   return (
     <div className="w-full max-w-lg bg-white shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-500 border border-slate-300">
       <div className="bg-brand-dark px-6 py-4 flex items-center justify-between border-b border-slate-700">
@@ -73,6 +74,21 @@ export default function VistaCarga({ onFileUpload, tipoDocumento, setTipoDocumen
             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
           />
         </label>
+
+        <div className="w-full max-w-xs flex items-center gap-3 my-5">
+          <div className="flex-1 h-px bg-slate-200" />
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">o</span>
+          <div className="flex-1 h-px bg-slate-200" />
+        </div>
+
+        <button
+          type="button"
+          onClick={onCrearNueva}
+          className="w-full max-w-xs flex items-center justify-center gap-2 bg-white text-brand-dark px-6 py-4 font-bold text-sm uppercase tracking-wider hover:bg-slate-50 transition-all duration-200 border border-slate-300"
+        >
+          <FilePlus2 size={18} />
+          Crear Plantilla en Blanco
+        </button>
       </div>
     </div>
   );

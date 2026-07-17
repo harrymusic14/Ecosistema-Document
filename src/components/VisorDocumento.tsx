@@ -23,7 +23,13 @@ export interface EstadoDocumento {
   cantidad: string;
   filas: FilaDocumento[];
   total: string;
+  introduccion: string;
 }
+
+// Punto de partida del bloque de presentación (fijo en el layout, pero editable): la
+// presentación, descripción técnica y alcance de una cotización real de riego por
+// aspersión, para que el usuario la ajuste caso a caso en vez de partir de cero.
+const INTRODUCCION_INICIAL = `<p>Por medio del presente, tenemos el agrado de remitir nuestra propuesta económica por la instalación de un sistema integral de riego automático por aspersión para los jardines de su residencia, nuestra propuesta ha sido elaborada en base al plano.</p><p>En el sistema propuesto el riego de las áreas verdes se ha dividido en zonas o sectores, esto para que el radio de acción de los aspersores sea óptimo. En el diseño del sistema se ha considerado un traslape del 100% entre aspersores. Los aspersores cotizados son del tipo pop-up, es decir, sólo se verán mientras riegan para luego ocultarse bajo el grass, evitando así tropiezos o accidentes y facilitando las labores del personal de jardinería. El equipo de riego cotizado es marca HUNTER de U.S.A.. La garantía que damos por el equipo de riego es de 3 (tres) años contra cualquier defecto de fábrica.</p><p>A continuación detallamos algunos puntos importantes en cuanto al sistema de riego:</p><ol><li>El número de sectores en que se ha dividido el riego de las áreas verdes es de 8.</li><li>El consumo de agua estimado por cada riego es de 3.8m3 de agua por riego en condiciones de máxima demanda (es decir en verano).</li><li>El tiempo total de riego es de 55 minutos para cubrir todos los sectores.</li><li>Se ha considerado un traslape del 100% entre aspersores, para asegurar un riego parejo en todos los sectores evitando así manchas en el grass.</li><li>Toda la red de tuberías se instalará a 35 cm. de profundidad.</li><li>Se considera en la cotización solo lo que indica el diseño de riego.</li></ol><p>A continuación detallamos los componentes de nuestra propuesta:</p>`;
 
 // Espera a que las fuentes y todas las imágenes (ej. el logo) del elemento terminen de
 // cargar. Sin esto, si el usuario descarga el PDF apenas se abre la vista, html2canvas
@@ -106,6 +112,7 @@ export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento,
     cantidad: '01',
     filas: datosBase.filas,
     total: datosBase.totalTexto,
+    introduccion: INTRODUCCION_INICIAL,
   }));
   const [pasado, setPasado] = useState<EstadoDocumento[]>([]);
   const [futuro, setFuturo] = useState<EstadoDocumento[]>([]);
@@ -166,6 +173,7 @@ export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento,
   const actualizarFecha = (html: string) => confirmarCambio({ ...estado, fecha: html });
   const actualizarCantidad = (html: string) => confirmarCambio({ ...estado, cantidad: html });
   const actualizarTotal = (html: string) => confirmarCambio({ ...estado, total: html });
+  const actualizarIntroduccion = (html: string) => confirmarCambio({ ...estado, introduccion: html });
   const actualizarFila = (id: string, campo: 'html' | 'precio', valor: string) =>
     confirmarCambio({ ...estado, filas: estado.filas.map(f => (f.id === id ? { ...f, [campo]: valor } : f)) });
 
@@ -187,12 +195,37 @@ export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento,
     confirmarCambio({ ...estado, filas: estado.filas.filter(f => f.id !== id) });
   };
 
+  // "Agregar hoja" fuerza un salto de página manual: se agrega una fila vacía marcada
+  // con saltoPaginaAntes, así el usuario tiene dónde empezar a escribir en la hoja
+  // nueva aunque la anterior todavía tuviera espacio libre. "Quitar hoja" deshace el
+  // último salto manual (las filas de esa hoja vuelven a fluir con la anterior); no
+  // toca los saltos automáticos por desborde, esos no se pueden "quitar" -son
+  // consecuencia del contenido, no una hoja agregada a mano.
+  const puedeQuitarHoja = estado.filas.some(f => f.saltoPaginaAntes);
+  const agregarHoja = () => {
+    contadorNuevaFila.current += 1;
+    confirmarCambio({
+      ...estado,
+      filas: [...estado.filas, { id: `fila-nueva-${contadorNuevaFila.current}`, html: '', precio: '', precioNegrita: false, saltoPaginaAntes: true }],
+    });
+  };
+  const quitarHoja = () => {
+    const idx = [...estado.filas].reverse().findIndex(f => f.saltoPaginaAntes);
+    if (idx === -1) return;
+    const indiceReal = estado.filas.length - 1 - idx;
+    confirmarCambio({
+      ...estado,
+      filas: estado.filas.map((f, i) => (i === indiceReal ? { ...f, saltoPaginaAntes: false } : f)),
+    });
+  };
+
   const handleDownloadPDF = async () => {
-    const element = document.getElementById('documento-a4');
-    if (!element) return;
+    const contenedor = document.getElementById('documento-completo');
+    const hojas = Array.from(document.querySelectorAll<HTMLElement>('.hoja-a4'));
+    if (!contenedor || hojas.length === 0) return;
 
     setGenerando(true);
-    await esperarRecursosListos(element);
+    await esperarRecursosListos(contenedor);
 
     const cssTexto = extraerCssActual();
     const inyectarCss = (clonedDoc: Document) => {
@@ -215,67 +248,13 @@ export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento,
     const pageWidth = pdf.internal.pageSize.getWidth();
     const pageHeight = pdf.internal.pageSize.getHeight();
 
-    // 1mm = 96/25.4 px, la equivalencia estándar que usan los navegadores para CSS.
-    const PX_POR_MM = 96 / 25.4;
-    const raiz = document.documentElement;
-    const fontSizeOriginal = raiz.style.fontSize;
+    // ignoreElements excluye los controles de edición (botones agregar/quitar fila u
+    // hoja, clase "pdf-ocultar") de la captura: son solo ayuda de edición en pantalla,
+    // no deben aparecer en el PDF final.
+    const ignorarControlesEdicion = (el: Element) => el.classList.contains('pdf-ocultar');
 
-    const medirAltoMm = () => element.getBoundingClientRect().height / PX_POR_MM;
-
-    try {
-      // El ancho de la hoja (max-w-[210mm]) y su relleno (p-[15mm]) están en milímetros
-      // fijos y no cambian, pero el tamaño de letra y los espaciados internos (Tailwind)
-      // están en rem, relativos al tamaño de fuente raíz. Reduciendo ese tamaño raíz -y
-      // solo si hace falta- el contenido se compacta y usa menos alto sin angostar la
-      // hoja ni dejar márgenes en blanco a los costados, igual que "ajustar a una
-      // página" en Word: si todo el documento cabía en una hoja en el original (aunque
-      // la letra sea chica), debe seguir cabiendo en una sola hoja aquí.
-      raiz.style.fontSize = '';
-      void element.offsetHeight;
-      const altoNatural = medirAltoMm();
-      const paginasNaturales = Math.max(1, Math.ceil(altoNatural / pageHeight));
-
-      const ESCALA_MINIMA = 0.5;
-      let escalaElegida = 1;
-      let paginasObjetivo = paginasNaturales;
-
-      for (let candidata = 1; candidata < paginasNaturales; candidata++) {
-        const altoObjetivo = candidata * pageHeight;
-        let lo = ESCALA_MINIMA;
-        let hi = 1;
-        let logrado = false;
-
-        for (let iter = 0; iter < 8; iter++) {
-          const mid = (lo + hi) / 2;
-          raiz.style.fontSize = `${mid * 100}%`;
-          void element.offsetHeight;
-          if (medirAltoMm() > altoObjetivo) {
-            hi = mid;
-          } else {
-            lo = mid;
-            logrado = true;
-          }
-        }
-
-        if (logrado) {
-          escalaElegida = lo;
-          paginasObjetivo = candidata;
-          break;
-        }
-      }
-
-      raiz.style.fontSize = paginasObjetivo === paginasNaturales ? '' : `${escalaElegida * 100}%`;
-      void element.offsetHeight;
-
-      // capturaTieneEstilos queda como red de seguridad adicional (ej. por si alguna
-      // imagen no cargó a tiempo), pero ya no depende de reintentar una petición de red
-      // para el CSS: onclone lo inyecta directo, sin red, en cada intento.
-      // ignoreElements excluye los controles de edición (botones agregar/quitar fila,
-      // clase "pdf-ocultar") de la captura: son solo ayuda de edición en pantalla, no
-      // deben aparecer en el PDF final.
-      const ignorarControlesEdicion = (el: Element) => el.classList.contains('pdf-ocultar');
-
-      let canvas = await html2canvas(element, {
+    const capturarHoja = async (hoja: HTMLElement) => {
+      let canvas = await html2canvas(hoja, {
         scale: 2,
         useCORS: true,
         backgroundColor: '#ffffff',
@@ -284,8 +263,11 @@ export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento,
         ignoreElements: ignorarControlesEdicion,
       });
 
-      for (let intento = 0; intento < 2 && !capturaTieneEstilos(canvas, element); intento++) {
-        canvas = await html2canvas(element, {
+      // capturaTieneEstilos queda como red de seguridad adicional (ej. por si alguna
+      // imagen no cargó a tiempo), pero ya no depende de reintentar una petición de red
+      // para el CSS: onclone lo inyecta directo, sin red, en cada intento.
+      for (let intento = 0; intento < 2 && !capturaTieneEstilos(canvas, hoja); intento++) {
+        canvas = await html2canvas(hoja, {
           scale: 2,
           useCORS: true,
           backgroundColor: '#ffffff',
@@ -294,23 +276,35 @@ export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento,
           ignoreElements: ignorarControlesEdicion,
         });
       }
+      return canvas;
+    };
 
-      const imgData = canvas.toDataURL('image/jpeg', 0.98);
+    try {
+      // Cada "hoja-a4" es una página A4 real (297mm) ya repartida por PlantillaFactura
+      // (encabezado en la primera, totales/pie en la última). En el caso normal cada
+      // una entra en una sola página del PDF; si de todas formas una hoja concreta sale
+      // más alta que 297mm (ej. una introducción larguísima que no se pudo repartir),
+      // esa hoja puntual se reparte en varias páginas del PDF de forma proporcional,
+      // igual que hacía antes el documento completo.
+      for (let i = 0; i < hojas.length; i++) {
+        if (i > 0) pdf.addPage();
 
-      const imgWidth = pageWidth;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+        const canvas = await capturarHoja(hojas[i]);
+        const imgData = canvas.toDataURL('image/jpeg', 0.98);
+        const imgWidth = pageWidth;
+        const imgHeight = (canvas.height * imgWidth) / canvas.width;
 
-      let heightLeft = imgHeight;
-      let position = 0;
-
-      pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
-      heightLeft -= pageHeight;
-
-      while (heightLeft > 0.5) {
-        position = heightLeft - imgHeight;
-        pdf.addPage();
+        let heightLeft = imgHeight;
+        let position = 0;
         pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
         heightLeft -= pageHeight;
+
+        while (heightLeft > 0.5) {
+          position = heightLeft - imgHeight;
+          pdf.addPage();
+          pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
+          heightLeft -= pageHeight;
+        }
       }
 
       pdf.save(`${nombreLimpio}.pdf`);
@@ -318,7 +312,6 @@ export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento,
       console.error('Error al generar PDF:', error);
       alert('Error al procesar el PDF. Verifica que el archivo no contenga imágenes o formatos inusuales.');
     } finally {
-      raiz.style.fontSize = fontSizeOriginal;
       setGenerando(false);
     }
   };
@@ -342,15 +335,20 @@ export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento,
           tieneIgv={datosBase.tieneIgv}
           subtotalTexto={datosBase.subtotalTexto}
           igvTexto={datosBase.igvTexto}
+          esMultiOpcion={datosBase.esMultiOpcion}
           tipoDocumento={tipoDocumento}
           contenedorRef={contenedorRef}
           onCambiarCliente={actualizarCliente}
           onCambiarFecha={actualizarFecha}
           onCambiarCantidad={actualizarCantidad}
           onCambiarTotal={actualizarTotal}
+          onCambiarIntroduccion={actualizarIntroduccion}
           onCambiarFila={actualizarFila}
           onAgregarFila={agregarFila}
           onQuitarFila={quitarFila}
+          onAgregarHoja={agregarHoja}
+          onQuitarHoja={quitarHoja}
+          puedeQuitarHoja={puedeQuitarHoja}
         />
       </div>
     </div>
