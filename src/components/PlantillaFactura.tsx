@@ -60,15 +60,6 @@ function Celda({ className, html, onCommit, editable, onKeyDown, celdaRef }: {
   );
 }
 
-// Ancho real del contenido de una hoja: 210mm de hoja A4 menos 15mm de margen a cada
-// lado (ver p-[15mm] en cada <article>). El clon de medición se fija a este mismo
-// ancho para que el texto envuelva (wrap) exactamente igual que en la hoja visible.
-const ANCHO_CONTENIDO_MM = 210 - 15 * 2;
-const PX_POR_MM = 96 / 25.4;
-const ALTO_PAGINA_MM = 297;
-const MARGEN_MM = 15;
-const ALTO_CONTENIDO_PX = (ALTO_PAGINA_MM - MARGEN_MM * 2) * PX_POR_MM;
-
 export default function PlantillaFactura({
   estado, cuentaBancaria, tieneIgv, subtotalTexto, igvTexto, esMultiOpcion, tipoDocumento, contenedorRef,
   onCambiarCliente, onCambiarFecha, onCambiarCantidad, onCambiarTotal, onCambiarIntroduccion,
@@ -314,108 +305,48 @@ export default function PlantillaFactura({
   // que ocupa cada pieza -encabezado completo, encabezado liviano, cada fila, y el
   // cierre (totales+cuenta+pie)- y con esas alturas reales se reparten las filas entre
   // hojas de 297mm, exactamente como Word reparte una tabla larga entre páginas.
-  const prefijoCompletoRef = useRef<HTMLDivElement>(null);
-  const prefijoLigeroRef = useRef<HTMLDivElement>(null);
-  const cierreRef = useRef<HTMLDivElement>(null);
-  const pieContinuaRef = useRef<HTMLParagraphElement>(null);
-  const filaRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
-
   const [paginas, setPaginas] = useState<FilaDocumento[][]>(() => [filas]);
 
   useLayoutEffect(() => {
-    const altoPrefijoCompleto = prefijoCompletoRef.current?.getBoundingClientRect().height ?? 0;
-    const altoPrefijoLigero = prefijoLigeroRef.current?.getBoundingClientRect().height ?? 0;
-    const altoCierre = cierreRef.current?.getBoundingClientRect().height ?? 0;
-    // El aviso "Página X de Y — continúa" no sale en el PDF (tiene pdf-ocultar), pero
-    // sigue ocupando espacio real en la hoja mientras se edita en pantalla -y esa
-    // altura no se restaba del presupuesto de ninguna página. El resultado: una hoja
-    // podía calcularse "llena" (267mm de contenido) y aun así, ya con este aviso
-    // sumado, terminar renderizando más alta que min-h-[290mm]. Al exportar, esa
-    // hoja de más altura se reparte en dos páginas del PDF -y como el aviso no se
-    // dibuja, la segunda sale casi en blanco. Reservando su altura de entrada se evita
-    // que una hoja crezca más de la cuenta por su culpa.
-    const altoPieContinua = pieContinuaRef.current?.getBoundingClientRect().height ?? 0;
-    const alturaFila = (fila: FilaDocumento) => filaRefs.current.get(fila.id)?.getBoundingClientRect().height ?? 0;
-
     const grupos: FilaDocumento[][] = [];
     let grupoActual: FilaDocumento[] = [];
-    let presupuesto = ALTO_CONTENIDO_PX - altoPrefijoCompleto - altoPieContinua;
 
-    filas.forEach((fila) => {
-      const altura = alturaFila(fila);
+    filas.forEach((fila, index) => {
       const esPrimeraDeLaHoja = grupoActual.length === 0;
-      const debeSaltar = !!fila.saltoPaginaAntes && !esPrimeraDeLaHoja;
-      const noCabe = !esPrimeraDeLaHoja && altura > presupuesto;
+      const esPrimeraFilaDelDocumento = index === 0;
+      
+      let debeSaltar = false;
+      if (fila.saltoPaginaAntes) {
+        if (!esPrimeraDeLaHoja) {
+          debeSaltar = true;
+        } else if (esPrimeraFilaDelDocumento && estado.introduccion) {
+          debeSaltar = true;
+        }
+      }
 
-      if (debeSaltar || noCabe) {
+      if (debeSaltar) {
         grupos.push(grupoActual);
         grupoActual = [];
-        presupuesto = ALTO_CONTENIDO_PX - altoPrefijoLigero - altoPieContinua;
       }
 
       grupoActual.push(fila);
-      presupuesto -= altura;
     });
     grupos.push(grupoActual);
-
-    // La última hoja además tiene que alcanzar para totales+cuenta+pie: si las filas
-    // que ya tiene no dejan sitio, el cierre se manda a una hoja nueva propia -vacía de
-    // filas- en vez de sacarle filas una por una a la última (eso no ayuda: quitarle
-    // una fila a una hoja que de por sí ya no alcanza para el cierre no cambia si el
-    // cierre entra o no, solo movía el problema sin resolverlo).
-    const esUnicaHoja = grupos.length === 1;
-    const presupuestoUltima = ALTO_CONTENIDO_PX - (esUnicaHoja ? altoPrefijoCompleto : altoPrefijoLigero);
-    const ultima = grupos[grupos.length - 1];
-    const altoFilasUltima = ultima.reduce((acc, f) => acc + alturaFila(f), 0);
-    if (altoFilasUltima + altoCierre > presupuestoUltima) {
-      grupos.push([]);
-    }
 
     setPaginas(grupos);
   }, [filas, estado.cliente, estado.fecha, estado.introduccion, estado.cantidad, estado.total, tieneIgv, esMultiOpcion, cuentaBancaria, subtotalTexto, igvTexto, tipoDocumento]);
 
+  const esPaginaTextoLibre = (filasDePagina: FilaDocumento[]) => {
+    return filasDePagina.every(f => !f.precio.trim() && !f.esTotalOpcion);
+  };
+
+  let lastTablePageIndex = paginas.map(esPaginaTextoLibre).lastIndexOf(false);
+  if (lastTablePageIndex === -1) {
+    lastTablePageIndex = paginas.length - 1;
+  }
+
   return (
     <div ref={contenedorRef} className="w-full max-w-[210mm] mx-auto my-8">
-      {/* Clon de medición: mismo ancho de contenido que una hoja real, invisible y
-          fuera del flujo, usado solo para leer alturas reales antes de paginar. */}
-      <div
-        aria-hidden="true"
-        style={{ position: 'absolute', top: 0, left: '-9999px', width: `${ANCHO_CONTENIDO_MM}mm`, visibility: 'hidden', pointerEvents: 'none' }}
-      >
-        <div ref={prefijoCompletoRef}>
-          {renderEncabezadoCompleto(false)}
-          <table className="w-full border-collapse">{renderCabeceraTabla()}</table>
-        </div>
-        <div ref={prefijoLigeroRef}>
-          {renderEncabezadoLigero()}
-          <table className="w-full border-collapse">{renderCabeceraTabla()}</table>
-        </div>
-        {filas.map((fila) => (
-          <table key={fila.id} className="w-full border-collapse table-fixed">
-            <colgroup>
-              <col className="w-16" />
-              <col />
-              <col className="w-32" />
-            </colgroup>
-            <tbody>
-              {renderFila(fila, {
-                editable: false,
-                primeraFilaDePagina: true,
-                mostrarValorCantidad: false,
-                filasEnEstaPagina: 1,
-                refCallback: (el) => { if (el) filaRefs.current.set(fila.id, el); },
-              })}
-            </tbody>
-          </table>
-        ))}
-        <div ref={cierreRef} className="flex flex-col">
-          {renderTotales(false)}
-          {renderPieYCuenta()}
-        </div>
-        <p ref={pieContinuaRef} className="mt-auto pt-4 text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-          Página 1 de 1 — continúa
-        </p>
-      </div>
 
       {/* Hojas reales: id="documento-completo" en el contenedor y clase "hoja-a4" en
           cada hoja son lo que handleDownloadPDF (VisorDocumento) usa para capturar
@@ -433,22 +364,72 @@ export default function PlantillaFactura({
 
               <div className="flex-1 mt-2">
                 <div className="relative">
-                  <table className="w-full text-left border-collapse border border-slate-300 mb-0">
-                    {renderCabeceraTabla()}
-                    <tbody className="text-slate-800 bg-white">
-                      {filasDePagina.map((fila, idx) => {
+                  {esPaginaTextoLibre(filasDePagina) ? (
+                    <div className="flex flex-col">
+                      {filasDePagina.map((fila) => {
                         const indiceGlobal = filas.indexOf(fila);
-                        return renderFila(fila, {
-                          editable: true,
-                          primeraFilaDePagina: idx === 0,
-                          mostrarValorCantidad: idx === 0 && esPrimeraPagina,
-                          filasEnEstaPagina: filasDePagina.length,
-                          puedeSubir: indiceGlobal > 0,
-                          puedeBajar: indiceGlobal < filas.length - 1,
-                        });
+                        const puedeSubir = indiceGlobal > 0;
+                        const puedeBajar = indiceGlobal < filas.length - 1;
+                        return (
+                          <div key={fila.id} className="relative group border-b border-transparent hover:border-slate-200 py-1 min-h-[1.5rem] print-avoid-break">
+                            <Celda
+                              className="outline-none focus:bg-sky-50 text-xs text-slate-800 leading-relaxed min-h-[1.5rem] break-words"
+                              html={fila.html}
+                              onCommit={(html) => onCambiarFila(fila.id, 'html', html)}
+                              editable={true}
+                              onKeyDown={(e) => manejarEnterEnDescripcion(e, fila.id)}
+                              celdaRef={(el) => { if (el) celdaDescripcionRefs.current.set(fila.id, el); else celdaDescripcionRefs.current.delete(fila.id); }}
+                            />
+                            <div className="pdf-ocultar absolute -right-7 top-1/2 -translate-y-1/2 flex flex-col items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button
+                                type="button"
+                                onClick={() => onMoverFila(fila.id, 'arriba')}
+                                disabled={!puedeSubir}
+                                title="Mover fila arriba"
+                                className="text-slate-400 hover:text-brand-blue transition-colors disabled:opacity-20 disabled:pointer-events-none"
+                              >
+                                <ChevronUp size={13} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => onQuitarFila(fila.id)}
+                                title="Quitar fila"
+                                className="text-slate-400 hover:text-red-600 transition-colors"
+                              >
+                                <X size={14} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => onMoverFila(fila.id, 'abajo')}
+                                disabled={!puedeBajar}
+                                title="Mover fila abajo"
+                                className="text-slate-400 hover:text-brand-blue transition-colors disabled:opacity-20 disabled:pointer-events-none"
+                              >
+                                <ChevronDown size={13} />
+                              </button>
+                            </div>
+                          </div>
+                        );
                       })}
-                    </tbody>
-                  </table>
+                    </div>
+                  ) : (
+                    <table className="w-full text-left border-collapse border border-slate-300 mb-0">
+                      {renderCabeceraTabla()}
+                      <tbody className="text-slate-800 bg-white">
+                        {filasDePagina.map((fila, idx) => {
+                          const indiceGlobal = filas.indexOf(fila);
+                          return renderFila(fila, {
+                            editable: true,
+                            primeraFilaDePagina: idx === 0,
+                            mostrarValorCantidad: idx === 0 && esPrimeraPagina,
+                            filasEnEstaPagina: filasDePagina.length,
+                            puedeSubir: indiceGlobal > 0,
+                            puedeBajar: indiceGlobal < filas.length - 1,
+                          });
+                        })}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
 
                 {esUltimaPagina && (
@@ -486,7 +467,7 @@ export default function PlantillaFactura({
                   </div>
                 )}
 
-                {esUltimaPagina && renderTotales(true)}
+                {indicePagina === lastTablePageIndex && renderTotales(true)}
               </div>
 
               {esUltimaPagina ? (

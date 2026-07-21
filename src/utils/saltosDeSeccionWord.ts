@@ -22,7 +22,12 @@ export async function insertarSaltosDeSeccionComoSaltosDePagina(arrayBuffer: Arr
   if (!archivoXml) return arrayBuffer;
 
   const xmlOriginal = await archivoXml.async('string');
-  const xmlModificado = insertarMarcadoresDeSalto(xmlOriginal);
+  let xmlModificado = insertarMarcadoresDeSalto(xmlOriginal);
+  
+  // Convierte los saltos de página suaves (los que Word inserta automáticamente al 
+  // llenarse la hoja) en saltos manuales para que mammoth los reconozca.
+  xmlModificado = xmlModificado.replace(/<w:lastRenderedPageBreak[^>]*>/g, '<w:br w:type="page"/>');
+
   if (xmlModificado === xmlOriginal) return arrayBuffer;
 
   zip.file('word/document.xml', xmlModificado);

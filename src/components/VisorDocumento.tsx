@@ -284,13 +284,8 @@ export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento,
     // y demás se conservan tal cual estaban en el archivo original).
     const nombreLimpio = nombreArchivo.replace(/[\\/:*?"<>|]/g, '').trim().toUpperCase() || 'DOCUMENTO';
 
-    const pdf = new jsPDF({
-      unit: 'mm',
-      format: 'a4',
-      orientation: 'portrait',
-    });
-    const pageWidth = pdf.internal.pageSize.getWidth();
-    const pageHeight = pdf.internal.pageSize.getHeight();
+    let pdf: jsPDF | null = null;
+    const pageWidth = 210; // Ancho A4 en mm
 
     // ignoreElements excluye los controles de edición (botones agregar/quitar fila u
     // hoja, clase "pdf-ocultar") de la captura: son solo ayuda de edición en pantalla,
@@ -331,23 +326,23 @@ export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento,
       // esa hoja puntual se reparte en varias páginas del PDF de forma proporcional,
       // igual que hacía antes el documento completo.
       for (let i = 0; i < hojas.length; i++) {
-        if (i > 0) pdf.addPage();
-
         const canvas = await capturarHoja(hojas[i]);
         const imgData = canvas.toDataURL('image/jpeg', 0.98);
         const imgWidth = pageWidth;
         const imgHeight = (canvas.height * imgWidth) / canvas.width;
 
-        let heightLeft = imgHeight;
-        let position = 0;
-        pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
-        heightLeft -= pageHeight;
+        const customPageHeight = Math.max(297, imgHeight);
 
-        while (heightLeft > 0.5) {
-          position = heightLeft - imgHeight;
-          pdf.addPage();
-          pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
-          heightLeft -= pageHeight;
+        if (!pdf) {
+          pdf = new jsPDF({
+            unit: 'mm',
+            format: [pageWidth, customPageHeight],
+            orientation: 'portrait',
+          });
+          pdf.addImage(imgData, 'JPEG', 0, 0, imgWidth, imgHeight);
+        } else {
+          pdf.addPage([pageWidth, customPageHeight], 'portrait');
+          pdf.addImage(imgData, 'JPEG', 0, 0, imgWidth, imgHeight);
         }
       }
 
@@ -370,7 +365,9 @@ export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento,
             types: [{ description: 'Documento PDF', accept: { 'application/pdf': ['.pdf'] } }],
           });
           const writable = await handle.createWritable();
-          await writable.write(pdf.output('blob'));
+          if (pdf) {
+            await writable.write(pdf.output('blob'));
+          }
           await writable.close();
         } catch (err) {
           // El usuario cerró el diálogo sin elegir ubicación: no es un error real, no
@@ -379,7 +376,9 @@ export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento,
           throw err;
         }
       } else {
-        pdf.save(nombreArchivoPdf);
+        if (pdf) {
+          pdf.save(nombreArchivoPdf);
+        }
       }
     } catch (error) {
       console.error('Error al generar PDF:', error);

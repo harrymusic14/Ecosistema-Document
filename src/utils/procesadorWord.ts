@@ -323,6 +323,7 @@ export const procesarFacturacion = (html: string, tipoPago: TipoPago = 'BCP'): D
   // minutos" -eso cortaría la introducción ahí por error.
   const esInicioDeContenidoDeTabla = (el: Element): boolean => {
     if (el.tagName === 'UL' || el.tagName === 'OL') return true;
+    if (elementosConSaltoAntes.has(el)) return true;
     const texto = el.textContent?.trim() || '';
     if (!texto) return false;
     return dotLeaderRegex.test(texto);
