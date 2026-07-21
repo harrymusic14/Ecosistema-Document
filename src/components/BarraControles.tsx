@@ -13,7 +13,9 @@ interface BarraControlesProps {
   contenedorRef: RefObject<HTMLDivElement | null>;
 }
 
-export default function BarraControles({ onVolver, onDownload, generando = false, onDeshacer, onRehacer, puedeDeshacer, puedeRehacer, contenedorRef }: BarraControlesProps) {
+export default function BarraControles({
+  onVolver, onDownload, generando = false, onDeshacer, onRehacer, puedeDeshacer, puedeRehacer, contenedorRef,
+}: BarraControlesProps) {
   return (
     <div className="w-full bg-white border-b border-slate-300 shadow-sm print:hidden sticky top-0 z-50">
       <div className="px-6 py-4 flex flex-col sm:flex-row justify-between items-center gap-4">

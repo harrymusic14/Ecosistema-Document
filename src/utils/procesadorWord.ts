@@ -28,6 +28,10 @@ export interface DatosFacturacion {
   // "PRECIO TOTAL"): en ese caso el total general de abajo no representa nada -cada
   // opción ya muestra el suyo en su propia fila- así que la plantilla lo oculta.
   esMultiOpcion: boolean;
+  // Párrafos de presentación/descripción (HTML) que preceden al primer renglón de
+  // precios o lista del Word original. Vacío si el documento no traía ninguno -en ese
+  // caso VisorDocumento usa su propio texto de partida en vez de dejar esto en blanco.
+  introduccion: string;
 }
 
 export const procesarFacturacion = (html: string, tipoPago: TipoPago = 'BCP'): DatosFacturacion => {
@@ -93,6 +97,13 @@ export const procesarFacturacion = (html: string, tipoPago: TipoPago = 'BCP'): D
     const text = child.textContent?.trim() || '';
     return !!text && PRICE_LINE_REGEX.test(text.toUpperCase());
   }).length > 1;
+
+  // Marcador que App.tsx le pide a mammoth que deje en el HTML en el lugar exacto de
+  // cada salto de página manual del Word original (ver styleMap en App.tsx). Se busca
+  // ANTES del forEach principal porque ese mismo bucle decide qué hijos sobreviven
+  // (nodesToRemove) y necesitamos saber, para cada uno, si contenía el marcador.
+  const contieneMarcadorSalto = (el: Element) => el.matches('.salto-pagina-word') || el.querySelector('.salto-pagina-word') !== null;
+  const childrenOriginales = Array.from(tempDiv.children);
 
   Array.from(tempDiv.children).forEach(child => {
     const text = child.textContent?.trim() || '';
@@ -185,6 +196,34 @@ export const procesarFacturacion = (html: string, tipoPago: TipoPago = 'BCP'): D
     }
   });
 
+  // Asocia cada marcador de salto de página con la primera fila que realmente
+  // sobrevive después de él (el párrafo que traía el marcador casi siempre queda
+  // vacío -era solo el Ctrl+Enter- y se elimina en el paso de arriba junto con el
+  // resto de nodesToRemove; si no se propagara, el corte de hoja se perdería). Si el
+  // marcador viene pegado a texto real dentro del mismo párrafo (caso raro), esa
+  // misma fila es la que arranca hoja nueva.
+  const elementosConSaltoAntes = new Set<Element>();
+  {
+    let pendiente = false;
+    childrenOriginales.forEach(child => {
+      const marcador = contieneMarcadorSalto(child);
+      const removido = nodesToRemove.includes(child as HTMLElement);
+      if (marcador && removido) {
+        pendiente = true;
+        return;
+      }
+      if (marcador && !removido) {
+        elementosConSaltoAntes.add(child);
+        pendiente = false;
+        return;
+      }
+      if (!removido && pendiente) {
+        elementosConSaltoAntes.add(child);
+        pendiente = false;
+      }
+    });
+  }
+
   nodesToRemove.forEach(node => {
     if (node.parentNode) {
       node.parentNode.removeChild(node);
@@ -266,6 +305,38 @@ export const procesarFacturacion = (html: string, tipoPago: TipoPago = 'BCP'): D
   // documentos originales lo escriben así, y también en dólares ("U$200.00") además de
   // soles ("S/"), ya que algunas cotizaciones de repuestos importados usan esa moneda.
   const dotLeaderRegex = /^(.+?)[\s.·•…:]*((?:S\s*\/\s*\.?|US\s*\$|U\s*\$|\$)\s*[\d,]+(?:\.\d{2})?)\s*$/i;
+
+  // ---------- Introducción ----------
+  // Antes de armar la tabla, los párrafos de presentación/descripción libre que
+  // preceden al primer renglón de precios ("título....precio") o a la primera lista
+  // (viñetas/numerada) se separan del resto: sin esto, cada uno de esos párrafos
+  // -que no tienen cantidad ni precio- terminaba colándose como una fila más de la
+  // tabla (con la columna Precio vacía), duplicando visualmente el mismo texto que
+  // ya se mostraba arriba como introducción. En cuanto aparece contenido que SÍ es
+  // de la tabla (precio o lista), se deja de capturar introducción -lo que venga
+  // después, aunque sea texto libre (ej. "Forma de pago:"), pasa a ser una fila más,
+  // igual que antes.
+  // Ojo: se usa dotLeaderRegex (exige un símbolo de moneda real al final), NO
+  // PRICE_LINE_REGEX -esa es más laxa (le basta la palabra "TOTAL" seguida de
+  // cualquier número, sin moneda) y da falsos positivos con texto de la introducción
+  // que no tiene nada que ver con precios, ej. "el tiempo TOTAL de riego es de 55
+  // minutos" -eso cortaría la introducción ahí por error.
+  const esInicioDeContenidoDeTabla = (el: Element): boolean => {
+    if (el.tagName === 'UL' || el.tagName === 'OL') return true;
+    const texto = el.textContent?.trim() || '';
+    if (!texto) return false;
+    return dotLeaderRegex.test(texto);
+  };
+  const parrafosIntroduccion: string[] = [];
+  const elementosDeIntroduccion: Element[] = [];
+  for (const child of Array.from(tempDiv.children)) {
+    if (esInicioDeContenidoDeTabla(child)) break;
+    parrafosIntroduccion.push(child.outerHTML);
+    elementosDeIntroduccion.push(child);
+  }
+  elementosDeIntroduccion.forEach(el => el.parentNode?.removeChild(el));
+  const introduccion = parrafosIntroduccion.join('');
+
   const filasDescripcion = Array.from(tempDiv.children).map(child => {
     const text = child.textContent?.trim() || '';
     const match = text.match(dotLeaderRegex);
@@ -274,6 +345,7 @@ export const procesarFacturacion = (html: string, tipoPago: TipoPago = 'BCP'): D
     // de cada OPCION. Al llegar hasta acá se marcan para que la plantilla las pinte
     // como su propia barra de total, en vez de una fila más de la tabla.
     const esTotalOpcion = esMultiOpcion && PRICE_LINE_REGEX.test(text.toUpperCase());
+    const saltoPaginaAntes = elementosConSaltoAntes.has(child);
     if (match) {
       const crudo = child.textContent || '';
       const espaciosIniciales = crudo.length - crudo.trimStart().length;
@@ -293,13 +365,14 @@ export const procesarFacturacion = (html: string, tipoPago: TipoPago = 'BCP'): D
         precio: match[2].trim(),
         precioNegrita,
         esTotalOpcion,
+        saltoPaginaAntes,
       };
     }
-    return { html: child.innerHTML, precio: null as string | null, precioNegrita: false, esTotalOpcion };
+    return { html: child.innerHTML, precio: null as string | null, precioNegrita: false, esTotalOpcion, saltoPaginaAntes };
   });
 
   if (filasDescripcion.length === 0) {
-    filasDescripcion.push({ html: 'SERVICIO GENERAL', precio: null, precioNegrita: false, esTotalOpcion: false });
+    filasDescripcion.push({ html: 'SERVICIO GENERAL', precio: null, precioNegrita: false, esTotalOpcion: false, saltoPaginaAntes: false });
   }
 
   const filas: FilaDocumento[] = filasDescripcion.map((linea, idx) => ({
@@ -308,6 +381,7 @@ export const procesarFacturacion = (html: string, tipoPago: TipoPago = 'BCP'): D
     precio: linea.precio ?? '',
     precioNegrita: linea.precioNegrita,
     esTotalOpcion: linea.esTotalOpcion,
+    saltoPaginaAntes: linea.saltoPaginaAntes,
   }));
 
   // ---------- Bloque bancario, ahora SEPARADO del resto del contenido ----------
@@ -335,5 +409,5 @@ export const procesarFacturacion = (html: string, tipoPago: TipoPago = 'BCP'): D
     tipoPago === 'SCOTIABANK' ? cuentaBancariaScotiabank :
     cuentaBancariaBCP;
 
-  return { cliente, fecha, filas, totalTexto, subtotalTexto, igvTexto, tieneIgv, cuentaBancaria, esMultiOpcion };
+  return { cliente, fecha, filas, totalTexto, subtotalTexto, igvTexto, tieneIgv, cuentaBancaria, esMultiOpcion, introduccion };
 };

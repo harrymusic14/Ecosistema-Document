@@ -8,6 +8,7 @@ import { Buffer } from 'buffer';
 import VistaCarga from './components/VistaCarga';
 import VisorDocumento from './components/VisorDocumento';
 import { extractLegacyDocWithBold } from './utils/legacyDocBoldExtractor';
+import { insertarSaltosDeSeccionComoSaltosDePagina } from './utils/saltosDeSeccionWord';
 import type { TipoPago } from './utils/procesadorWord';
 
 // Configure PDF.js worker (usa el worker incluido en el proyecto en vez de una CDN externa,
@@ -125,7 +126,26 @@ export default function App() {
           }
           setDocHtml(fullHtml);
         } else {
-          const result = await mammoth.convertToHtml({ arrayBuffer });
+          // Muchos Word no separan sus hojas con saltos de página manuales (Ctrl+Enter)
+          // sino con SALTOS DE SECCIÓN (para poder cambiar el encabezado/pie por hoja,
+          // como en la cotización de ejemplo) -mammoth descarta ambos tipos de salto
+          // por completo, así que sin este paso previo no hay forma de saber, a partir
+          // del HTML que entrega, dónde terminaba cada hoja real del Word original.
+          // insertarSaltosDeSeccionComoSaltosDePagina reescribe el .docx en memoria
+          // convirtiendo cada salto de sección real en un salto de página manual, para
+          // que de ahí en adelante se procesen todos por el mismo camino.
+          const arrayBufferConSaltos = await insertarSaltosDeSeccionComoSaltosDePagina(arrayBuffer);
+
+          // Este styleMap convierte cada salto de página (ya sea el que puso el usuario
+          // con Ctrl+Enter, o el que se acaba de sintetizar arriba a partir de un salto
+          // de sección) en un marcador (<hr class="salto-pagina-word">) que
+          // procesadorWord.ts detecta para respetar el corte de hoja original. Tiene
+          // que ser una etiqueta HTML "void" (hr/br/img/input): mammoth elimina en
+          // silencio cualquier otro elemento sin contenido -un <span> vacío, por
+          // ejemplo, no sobrevive a la conversión y el marcador se perdería igual.
+          const result = await mammoth.convertToHtml({ arrayBuffer: arrayBufferConSaltos }, {
+            styleMap: ["br[type='page'] => hr.salto-pagina-word:fresh"],
+          });
           setDocHtml(result.value);
         }
       } catch (error) {

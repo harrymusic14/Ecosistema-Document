@@ -14,6 +14,13 @@ interface VisorProps {
   tipoPago: TipoPago;
 }
 
+// Forma mínima del handle que devuelve showSaveFilePicker (File System Access API).
+// No viene en los tipos estándar de TypeScript/DOM del proyecto, así que se declara
+// acá solo lo que realmente se usa, en vez de traer una librería de tipos completa.
+interface FileSystemFileHandleLike {
+  createWritable: () => Promise<{ write: (data: Blob) => Promise<void>; close: () => Promise<void> }>;
+}
+
 // Todo el contenido editable del documento (lo que NO cambia es el estilo/plantilla).
 // Vive en VisorDocumento -no en PlantillaFactura- para que el historial de deshacer/
 // rehacer y los botones de la barra de controles compartan el mismo estado.
@@ -24,6 +31,9 @@ export interface EstadoDocumento {
   filas: FilaDocumento[];
   total: string;
   introduccion: string;
+  // Algunos documentos (ej. liquidaciones) no necesitan columna de cantidad; se puede
+  // ocultar por completo en vez de dejarla siempre vacía.
+  mostrarColumnaCantidad: boolean;
 }
 
 // Punto de partida del bloque de presentación (fijo en el layout, pero editable): la
@@ -112,7 +122,13 @@ export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento,
     cantidad: '01',
     filas: datosBase.filas,
     total: datosBase.totalTexto,
-    introduccion: INTRODUCCION_INICIAL,
+    // El texto de partida fijo (INTRODUCCION_INICIAL) es solo para "Crear Plantilla en
+    // Blanco" -ahí no hay ningún Word real del que partir, así que tiene sentido
+    // sugerir un punto de partida. Para un Word subido de verdad, se usa ÚNICAMENTE lo
+    // que ese documento realmente traía (puede quedar vacío si no tenía párrafos de
+    // presentación): no se debe inventar contenido que el cliente no escribió.
+    introduccion: nombreArchivo === 'NUEVA PLANTILLA' ? INTRODUCCION_INICIAL : datosBase.introduccion,
+    mostrarColumnaCantidad: true,
   }));
   const [pasado, setPasado] = useState<EstadoDocumento[]>([]);
   const [futuro, setFuturo] = useState<EstadoDocumento[]>([]);
@@ -194,6 +210,34 @@ export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento,
     if (estado.filas.length <= 1) return;
     confirmarCambio({ ...estado, filas: estado.filas.filter(f => f.id !== id) });
   };
+
+  // Enter dentro de la celda de Descripción (ver PlantillaFactura) llama a esto en vez
+  // de agregar la fila nueva siempre al final: la inserta justo después de la fila
+  // donde el usuario estaba escribiendo, empujando el resto hacia abajo -igual que
+  // Word, que al presionar Enter corre todo el contenido siguiente una línea más abajo.
+  const insertarFilaDespues = (id: string) => {
+    contadorNuevaFila.current += 1;
+    const idx = estado.filas.findIndex(f => f.id === id);
+    const nueva: FilaDocumento = { id: `fila-nueva-${contadorNuevaFila.current}`, html: '', precio: '', precioNegrita: false };
+    const filas = [...estado.filas];
+    filas.splice(idx === -1 ? filas.length : idx + 1, 0, nueva);
+    confirmarCambio({ ...estado, filas });
+  };
+
+  // Intercambia una fila con su vecina de arriba/abajo -no reordena por hoja, solo
+  // dentro de la lista plana de filas del documento; la paginación (PlantillaFactura)
+  // ya se encarga de recalcular en qué hoja cae cada una después del cambio, igual que
+  // si el usuario hubiera reescrito el Word en ese nuevo orden.
+  const moverFila = (id: string, direccion: 'arriba' | 'abajo') => {
+    const idx = estado.filas.findIndex(f => f.id === id);
+    const destino = direccion === 'arriba' ? idx - 1 : idx + 1;
+    if (idx === -1 || destino < 0 || destino >= estado.filas.length) return;
+    const filas = [...estado.filas];
+    [filas[idx], filas[destino]] = [filas[destino], filas[idx]];
+    confirmarCambio({ ...estado, filas });
+  };
+
+  const alternarColumnaCantidad = () => confirmarCambio({ ...estado, mostrarColumnaCantidad: !estado.mostrarColumnaCantidad });
 
   // "Agregar hoja" fuerza un salto de página manual: se agrega una fila vacía marcada
   // con saltoPaginaAntes, así el usuario tiene dónde empezar a escribir en la hoja
@@ -307,7 +351,36 @@ export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento,
         }
       }
 
-      pdf.save(`${nombreLimpio}.pdf`);
+      const nombreArchivoPdf = `${nombreLimpio}.pdf`;
+
+      // showSaveFilePicker (File System Access API, solo Chrome/Edge) abre el diálogo
+      // nativo "Guardar como" para que el usuario elija dónde guardar el PDF -que es lo
+      // que se pidió aquí en vez de que se vaya directo a la carpeta de Descargas sin
+      // preguntar. Firefox y Safari no la implementan, así que ahí se cae al
+      // comportamiento anterior (pdf.save) tal como estaba.
+      if ('showSaveFilePicker' in window) {
+        try {
+          const handle = await (window as unknown as {
+            showSaveFilePicker: (options: {
+              suggestedName: string;
+              types: { description: string; accept: Record<string, string[]> }[];
+            }) => Promise<FileSystemFileHandleLike>;
+          }).showSaveFilePicker({
+            suggestedName: nombreArchivoPdf,
+            types: [{ description: 'Documento PDF', accept: { 'application/pdf': ['.pdf'] } }],
+          });
+          const writable = await handle.createWritable();
+          await writable.write(pdf.output('blob'));
+          await writable.close();
+        } catch (err) {
+          // El usuario cerró el diálogo sin elegir ubicación: no es un error real, no
+          // hay nada que reportar ni reintentar con la descarga automática.
+          if ((err as DOMException)?.name === 'AbortError') return;
+          throw err;
+        }
+      } else {
+        pdf.save(nombreArchivoPdf);
+      }
     } catch (error) {
       console.error('Error al generar PDF:', error);
       alert('Error al procesar el PDF. Verifica que el archivo no contenga imágenes o formatos inusuales.');
@@ -346,9 +419,12 @@ export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento,
           onCambiarFila={actualizarFila}
           onAgregarFila={agregarFila}
           onQuitarFila={quitarFila}
+          onMoverFila={moverFila}
+          onInsertarFilaDespues={insertarFilaDespues}
           onAgregarHoja={agregarHoja}
           onQuitarHoja={quitarHoja}
           puedeQuitarHoja={puedeQuitarHoja}
+          onAlternarColumnaCantidad={alternarColumnaCantidad}
         />
       </div>
     </div>

@@ -1,6 +1,6 @@
 // src/components/PlantillaFactura.tsx
-import { useLayoutEffect, useRef, useState, type RefObject } from 'react';
-import { X, Plus, FilePlus2, FileMinus2 } from 'lucide-react';
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
+import { X, Plus, FilePlus2, FileMinus2, ChevronUp, ChevronDown, Hash } from 'lucide-react';
 import logo from '../assets/logo.png';
 import type { FilaDocumento } from '../utils/procesadorWord';
 import type { EstadoDocumento } from './VisorDocumento';
@@ -22,9 +22,12 @@ interface PlantillaFacturaProps {
   onCambiarFila: (id: string, campo: 'html' | 'precio', valor: string) => void;
   onAgregarFila: () => void;
   onQuitarFila: (id: string) => void;
+  onMoverFila: (id: string, direccion: 'arriba' | 'abajo') => void;
+  onInsertarFilaDespues: (id: string) => void;
   onAgregarHoja: () => void;
   onQuitarHoja: () => void;
   puedeQuitarHoja: boolean;
+  onAlternarColumnaCantidad: () => void;
 }
 
 // Celda de texto: editable en la vista real (contentEditable, onBlur confirma el
@@ -33,17 +36,26 @@ interface PlantillaFacturaProps {
 // No se vuelve a controlar el valor desde React en cada tecla -solo al salir del
 // campo- porque contentEditable y el children controlado de React no se llevan bien
 // mezclados: reescribir el contenido en cada tecla le rompería el cursor al usuario.
-function Celda({ className, html, onCommit, editable }: { className: string; html: string; onCommit?: (html: string) => void; editable: boolean }) {
+function Celda({ className, html, onCommit, editable, onKeyDown, celdaRef }: {
+  className: string;
+  html: string;
+  onCommit?: (html: string) => void;
+  editable: boolean;
+  onKeyDown?: (e: KeyboardEvent<HTMLDivElement>) => void;
+  celdaRef?: (el: HTMLDivElement | null) => void;
+}) {
   if (!editable) {
     return <div className={className} dangerouslySetInnerHTML={{ __html: html }} />;
   }
   return (
     <div
+      ref={celdaRef}
       className={className}
       contentEditable
       suppressContentEditableWarning
       dangerouslySetInnerHTML={{ __html: html }}
       onBlur={(e) => onCommit?.(e.currentTarget.innerHTML)}
+      onKeyDown={onKeyDown}
     />
   );
 }
@@ -60,9 +72,41 @@ const ALTO_CONTENIDO_PX = (ALTO_PAGINA_MM - MARGEN_MM * 2) * PX_POR_MM;
 export default function PlantillaFactura({
   estado, cuentaBancaria, tieneIgv, subtotalTexto, igvTexto, esMultiOpcion, tipoDocumento, contenedorRef,
   onCambiarCliente, onCambiarFecha, onCambiarCantidad, onCambiarTotal, onCambiarIntroduccion,
-  onCambiarFila, onAgregarFila, onQuitarFila, onAgregarHoja, onQuitarHoja, puedeQuitarHoja,
+  onCambiarFila, onAgregarFila, onQuitarFila, onMoverFila, onInsertarFilaDespues, onAgregarHoja, onQuitarHoja,
+  puedeQuitarHoja, onAlternarColumnaCantidad,
 }: PlantillaFacturaProps) {
   const filas: FilaDocumento[] = estado.filas;
+  const mostrarColumnaCantidad = estado.mostrarColumnaCantidad;
+
+  // Enter en la celda de Descripción inserta una fila nueva justo después (empujando
+  // el resto hacia abajo), en vez de solo permitir agregar filas al final del
+  // documento -tal como Word: al presionar Enter dentro de un párrafo, lo que sigue se
+  // corre para abajo. Shift+Enter sigue haciendo un salto de línea normal DENTRO de la
+  // misma celda (no se intercepta), para no perder esa opción de edición.
+  // idParaEnfocarTrasInsertar guarda el id de la fila que se acaba de escribir (la que
+  // "empuja"); en el próximo render, si esa fila ya no es la última, la fila
+  // inmediatamente después es la nueva -recién creada por VisorDocumento con un id que
+  // este componente no conoce de antemano- y se le pasa el foco automáticamente.
+  const idParaEnfocarTrasInsertar = useRef<string | null>(null);
+  const celdaDescripcionRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+
+  const manejarEnterEnDescripcion = (e: KeyboardEvent<HTMLDivElement>, filaId: string) => {
+    if (e.key !== 'Enter' || e.shiftKey) return;
+    e.preventDefault();
+    idParaEnfocarTrasInsertar.current = filaId;
+    onInsertarFilaDespues(filaId);
+  };
+
+  useEffect(() => {
+    const idAnterior = idParaEnfocarTrasInsertar.current;
+    if (!idAnterior) return;
+    const idx = filas.findIndex(f => f.id === idAnterior);
+    const nueva = idx !== -1 ? filas[idx + 1] : undefined;
+    if (nueva) {
+      celdaDescripcionRefs.current.get(nueva.id)?.focus();
+    }
+    idParaEnfocarTrasInsertar.current = null;
+  }, [filas]);
 
   // ---------- Encabezado completo (solo hoja 1): logo, membrete, RUC, Señor(es)/Fecha
   // y el bloque fijo de presentación -editable, pero siempre presente en esa posición-.
@@ -120,7 +164,7 @@ export default function PlantillaFactura({
   const renderCabeceraTabla = () => (
     <thead className="bg-brand-dark text-white text-xs uppercase tracking-wider">
       <tr>
-        <th className="p-3 border border-slate-700 w-16 text-center">Cant.</th>
+        {mostrarColumnaCantidad && <th className="p-3 border border-slate-700 w-16 text-center">Cant.</th>}
         <th className="p-3 border border-slate-700">Descripción</th>
         <th className="p-3 border border-slate-700 w-32 text-center">Precio</th>
         <th className="pdf-ocultar w-0 p-0 border-none" />
@@ -134,12 +178,20 @@ export default function PlantillaFactura({
   // global, no algo que se repita por hoja.
   const renderFila = (
     fila: FilaDocumento,
-    opciones: { editable: boolean; primeraFilaDePagina: boolean; mostrarValorCantidad: boolean; filasEnEstaPagina: number; refCallback?: (el: HTMLTableRowElement | null) => void },
+    opciones: {
+      editable: boolean;
+      primeraFilaDePagina: boolean;
+      mostrarValorCantidad: boolean;
+      filasEnEstaPagina: number;
+      puedeSubir?: boolean;
+      puedeBajar?: boolean;
+      refCallback?: (el: HTMLTableRowElement | null) => void;
+    },
   ) => {
-    const { editable, primeraFilaDePagina, mostrarValorCantidad, filasEnEstaPagina, refCallback } = opciones;
+    const { editable, primeraFilaDePagina, mostrarValorCantidad, filasEnEstaPagina, puedeSubir, puedeBajar, refCallback } = opciones;
     return (
       <tr key={fila.id} ref={refCallback} className="relative border-b border-slate-300 print-avoid-break">
-        {primeraFilaDePagina && (
+        {mostrarColumnaCantidad && primeraFilaDePagina && (
           <td className="p-0 text-center font-bold text-sm border-r border-slate-300 align-top w-16" rowSpan={filasEnEstaPagina}>
             {mostrarValorCantidad && (
               <Celda className="py-1 px-4 outline-none focus:bg-sky-50" html={estado.cantidad} onCommit={onCambiarCantidad} editable={editable} />
@@ -156,7 +208,14 @@ export default function PlantillaFactura({
         ) : (
           <>
             <td className="p-0 text-xs uppercase border-r border-slate-300 align-top leading-relaxed">
-              <Celda className="py-1 px-4 outline-none focus:bg-sky-50" html={fila.html} onCommit={(html) => onCambiarFila(fila.id, 'html', html)} editable={editable} />
+              <Celda
+                className="py-1 px-4 outline-none focus:bg-sky-50"
+                html={fila.html}
+                onCommit={(html) => onCambiarFila(fila.id, 'html', html)}
+                editable={editable}
+                onKeyDown={(e) => manejarEnterEnDescripcion(e, fila.id)}
+                celdaRef={(el) => { if (el) celdaDescripcionRefs.current.set(fila.id, el); else celdaDescripcionRefs.current.delete(fila.id); }}
+              />
             </td>
             <td className={`p-0 text-center text-sm text-slate-900 align-top${fila.precioNegrita ? ' font-bold' : ''}`}>
               <Celda className="py-1 px-4 outline-none focus:bg-sky-50" html={fila.precio} onCommit={(html) => onCambiarFila(fila.id, 'precio', html)} editable={editable} />
@@ -165,14 +224,34 @@ export default function PlantillaFactura({
         )}
         {editable && (
           <td className="pdf-ocultar w-0 p-0 border-none">
-            <button
-              type="button"
-              onClick={() => onQuitarFila(fila.id)}
-              title="Quitar fila"
-              className="absolute -right-7 top-1/2 -translate-y-1/2 text-slate-400 hover:text-red-600 transition-colors"
-            >
-              <X size={14} />
-            </button>
+            <div className="absolute -right-7 top-1/2 -translate-y-1/2 flex flex-col items-center gap-0.5">
+              <button
+                type="button"
+                onClick={() => onMoverFila(fila.id, 'arriba')}
+                disabled={!puedeSubir}
+                title="Mover fila arriba"
+                className="text-slate-400 hover:text-brand-blue transition-colors disabled:opacity-20 disabled:pointer-events-none"
+              >
+                <ChevronUp size={13} />
+              </button>
+              <button
+                type="button"
+                onClick={() => onQuitarFila(fila.id)}
+                title="Quitar fila"
+                className="text-slate-400 hover:text-red-600 transition-colors"
+              >
+                <X size={14} />
+              </button>
+              <button
+                type="button"
+                onClick={() => onMoverFila(fila.id, 'abajo')}
+                disabled={!puedeBajar}
+                title="Mover fila abajo"
+                className="text-slate-400 hover:text-brand-blue transition-colors disabled:opacity-20 disabled:pointer-events-none"
+              >
+                <ChevronDown size={13} />
+              </button>
+            </div>
           </td>
         )}
       </tr>
@@ -238,6 +317,7 @@ export default function PlantillaFactura({
   const prefijoCompletoRef = useRef<HTMLDivElement>(null);
   const prefijoLigeroRef = useRef<HTMLDivElement>(null);
   const cierreRef = useRef<HTMLDivElement>(null);
+  const pieContinuaRef = useRef<HTMLParagraphElement>(null);
   const filaRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
 
   const [paginas, setPaginas] = useState<FilaDocumento[][]>(() => [filas]);
@@ -246,11 +326,20 @@ export default function PlantillaFactura({
     const altoPrefijoCompleto = prefijoCompletoRef.current?.getBoundingClientRect().height ?? 0;
     const altoPrefijoLigero = prefijoLigeroRef.current?.getBoundingClientRect().height ?? 0;
     const altoCierre = cierreRef.current?.getBoundingClientRect().height ?? 0;
+    // El aviso "Página X de Y — continúa" no sale en el PDF (tiene pdf-ocultar), pero
+    // sigue ocupando espacio real en la hoja mientras se edita en pantalla -y esa
+    // altura no se restaba del presupuesto de ninguna página. El resultado: una hoja
+    // podía calcularse "llena" (267mm de contenido) y aun así, ya con este aviso
+    // sumado, terminar renderizando más alta que min-h-[290mm]. Al exportar, esa
+    // hoja de más altura se reparte en dos páginas del PDF -y como el aviso no se
+    // dibuja, la segunda sale casi en blanco. Reservando su altura de entrada se evita
+    // que una hoja crezca más de la cuenta por su culpa.
+    const altoPieContinua = pieContinuaRef.current?.getBoundingClientRect().height ?? 0;
     const alturaFila = (fila: FilaDocumento) => filaRefs.current.get(fila.id)?.getBoundingClientRect().height ?? 0;
 
     const grupos: FilaDocumento[][] = [];
     let grupoActual: FilaDocumento[] = [];
-    let presupuesto = ALTO_CONTENIDO_PX - altoPrefijoCompleto;
+    let presupuesto = ALTO_CONTENIDO_PX - altoPrefijoCompleto - altoPieContinua;
 
     filas.forEach((fila) => {
       const altura = alturaFila(fila);
@@ -261,7 +350,7 @@ export default function PlantillaFactura({
       if (debeSaltar || noCabe) {
         grupos.push(grupoActual);
         grupoActual = [];
-        presupuesto = ALTO_CONTENIDO_PX - altoPrefijoLigero;
+        presupuesto = ALTO_CONTENIDO_PX - altoPrefijoLigero - altoPieContinua;
       }
 
       grupoActual.push(fila);
@@ -323,6 +412,9 @@ export default function PlantillaFactura({
           {renderTotales(false)}
           {renderPieYCuenta()}
         </div>
+        <p ref={pieContinuaRef} className="mt-auto pt-4 text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+          Página 1 de 1 — continúa
+        </p>
       </div>
 
       {/* Hojas reales: id="documento-completo" en el contenedor y clase "hoja-a4" en
@@ -344,14 +436,17 @@ export default function PlantillaFactura({
                   <table className="w-full text-left border-collapse border border-slate-300 mb-0">
                     {renderCabeceraTabla()}
                     <tbody className="text-slate-800 bg-white">
-                      {filasDePagina.map((fila, idx) =>
-                        renderFila(fila, {
+                      {filasDePagina.map((fila, idx) => {
+                        const indiceGlobal = filas.indexOf(fila);
+                        return renderFila(fila, {
                           editable: true,
                           primeraFilaDePagina: idx === 0,
                           mostrarValorCantidad: idx === 0 && esPrimeraPagina,
                           filasEnEstaPagina: filasDePagina.length,
-                        }),
-                      )}
+                          puedeSubir: indiceGlobal > 0,
+                          puedeBajar: indiceGlobal < filas.length - 1,
+                        });
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -381,6 +476,13 @@ export default function PlantillaFactura({
                         <FileMinus2 size={14} /> Quitar hoja
                       </button>
                     )}
+                    <button
+                      type="button"
+                      onClick={onAlternarColumnaCantidad}
+                      className="flex items-center gap-1 text-xs font-bold text-slate-500 hover:text-brand-blue uppercase tracking-wide"
+                    >
+                      <Hash size={14} /> {mostrarColumnaCantidad ? 'Quitar columna Cant.' : 'Mostrar columna Cant.'}
+                    </button>
                   </div>
                 )}
 
