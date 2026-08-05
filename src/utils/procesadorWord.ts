@@ -338,7 +338,18 @@ export const procesarFacturacion = (html: string, tipoPago: TipoPago = 'BCP'): D
   elementosDeIntroduccion.forEach(el => el.parentNode?.removeChild(el));
   const introduccion = parrafosIntroduccion.join('');
 
-  const filasDescripcion = Array.from(tempDiv.children).map(child => {
+  // Algunas cotizaciones no repiten la descripción del ítem en la misma línea del
+  // precio: en vez de "Electrobomba....U$ 250.00" ponen la descripción en un párrafo
+  // o lista aparte y el precio solo en una línea con una etiqueta genérica como
+  // "PRECIO....U$ 250.00" (ver cotización HUNTER/ISRAEL, sección "EQUIPO DE BOMBEO").
+  // Si se tratara como una fila nueva, el precio quedaría "huérfano" bajo el título
+  // "PRECIO" y la descripción real se vería sin precio al lado. Se detecta ese caso
+  // para adjuntar el precio al renglón anterior en vez de crear uno nuevo.
+  const ETIQUETA_PRECIO_GENERICA = /^(?:PRECIO|TOTAL|SUBTOTAL|MONTO|COSTO|IMPORTE)$/i;
+
+  const filasDescripcion: Array<{ html: string; precio: string | null; precioNegrita: boolean; esTotalOpcion?: boolean; saltoPaginaAntes?: boolean }> = [];
+
+  Array.from(tempDiv.children).forEach(child => {
     const text = child.textContent?.trim() || '';
     const match = text.match(dotLeaderRegex);
     // Estas son exactamente las mismas líneas que en modo multi-opción no se
@@ -360,16 +371,28 @@ export const procesarFacturacion = (html: string, tipoPago: TipoPago = 'BCP'): D
       const inicioPrecio = espaciosIniciales + text.length - match[2].length;
       const finPrecio = espaciosIniciales + text.length;
       const precioNegrita = rangoEstaEnNegrita(child, inicioPrecio, finPrecio);
+      const precio = match[2].trim();
 
-      return {
+      if (!esTotalOpcion && ETIQUETA_PRECIO_GENERICA.test(titulo)) {
+        for (let i = filasDescripcion.length - 1; i >= 0; i--) {
+          if (!filasDescripcion[i].precio) {
+            filasDescripcion[i].precio = precio;
+            filasDescripcion[i].precioNegrita = precioNegrita;
+            return;
+          }
+        }
+      }
+
+      filasDescripcion.push({
         html: eraNegrita ? `<span class="font-bold">${titulo}</span>` : titulo,
-        precio: match[2].trim(),
+        precio,
         precioNegrita,
         esTotalOpcion,
         saltoPaginaAntes,
-      };
+      });
+      return;
     }
-    return { html: child.innerHTML, precio: null as string | null, precioNegrita: false, esTotalOpcion, saltoPaginaAntes };
+    filasDescripcion.push({ html: child.innerHTML, precio: null, precioNegrita: false, esTotalOpcion, saltoPaginaAntes });
   });
 
   if (filasDescripcion.length === 0) {
