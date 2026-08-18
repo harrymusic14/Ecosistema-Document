@@ -373,7 +373,18 @@ export default function VisorDocumento({ contenidoWord, onVolver, tipoDocumento,
           // El usuario cerró el diálogo sin elegir ubicación: no es un error real, no
           // hay nada que reportar ni reintentar con la descarga automática.
           if ((err as DOMException)?.name === 'AbortError') return;
-          throw err;
+
+          // Escribir en la ubicación elegida puede fallar sin que sea culpa del PDF en
+          // sí -el caso más común es que ya exista un archivo con ese nombre y esté
+          // abierto en un visor de PDF u otro programa, que Windows bloquea para
+          // escritura mientras tanto (NoModificationAllowedError). Antes esto abortaba
+          // todo el intento de descarga sin guardar nada en ningún lado, obligando a
+          // cerrar/borrar el archivo viejo y rehacer el PDF desde cero. En vez de
+          // perder el PDF ya generado, se cae a la descarga normal del navegador -que
+          // va a la carpeta de Descargas y agrega automáticamente "(1)", "(2)", etc. si
+          // el nombre ya existe ahí, sin fallar nunca por eso.
+          console.warn('No se pudo guardar en la ubicación elegida (¿el archivo está abierto en otro programa?), se descarga a la carpeta de Descargas en su lugar.', err);
+          if (pdf) pdf.save(nombreArchivoPdf);
         }
       } else {
         if (pdf) {
